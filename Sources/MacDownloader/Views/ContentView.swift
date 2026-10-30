@@ -67,6 +67,9 @@ public struct ContentView: View {
         .sheet(isPresented: $manager.showingSettingsSheet) {
             SettingsView()
         }
+        .sheet(isPresented: $manager.showingAboutSheet) {
+            AboutView()
+        }
         .sheet(item: $manager.selectedDetailItem) { item in
             DownloadDetailSheet(item: item)
         }

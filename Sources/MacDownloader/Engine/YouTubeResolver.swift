@@ -13,6 +13,8 @@ public struct YouTubeStreamOption: Codable, Sendable {
     public let size: Int64
     public let formattedSize: String
     public let formatId: String?
+    public let thumbnail: String?
+    public let duration: String?
 }
 
 public struct YouTubeResolutionResult: Codable, Sendable {
@@ -20,6 +22,8 @@ public struct YouTubeResolutionResult: Codable, Sendable {
     public let title: String
     public let channel: String?
     public let durationSeconds: Int?
+    public let durationText: String?
+    public let thumbnail: String?
     public let streams: [YouTubeStreamOption]
 }
 
@@ -58,6 +62,71 @@ public final class YouTubeEngine: @unchecked Sendable {
             }
         }
         return nil
+    }
+
+    public static func formatSeconds(_ sec: Int) -> String {
+        guard sec > 0 else { return "" }
+        let h = sec / 3600
+        let m = (sec % 3600) / 60
+        let s = sec % 60
+        if h > 0 {
+            return String(format: "%02d:%02d:%02d", h, m, s)
+        }
+        return String(format: "%02d:%02d", m, s)
+    }
+
+    public static func getEngineVersion() -> String {
+        guard let python = findBinary(named: "python3"),
+              let ytdlp = findBinary(named: "yt-dlp") else {
+            return "2026.10.26"
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: python)
+        process.arguments = [ytdlp, "--version"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        do {
+            try process.run()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            let v = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return v.isEmpty ? "2026.10.26" : v
+        } catch {
+            return "2026.10.26"
+        }
+    }
+
+    public static func updateEngine() async -> (success: Bool, message: String) {
+        guard let python = findBinary(named: "python3"),
+              let ytdlp = findBinary(named: "yt-dlp") else {
+            return (false, "Engine binaries not found")
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: python)
+        process.arguments = [ytdlp, "-U"]
+
+        var env = ProcessInfo.processInfo.environment
+        env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/Users/abishekwork/.nvm/versions/node/v24.21.0/bin"
+        process.environment = env
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+
+        do {
+            try process.run()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if process.terminationStatus == 0 {
+                return (true, output.isEmpty ? "yt-dlp is already up-to-date." : output)
+            } else {
+                return (false, "Update status \(process.terminationStatus): \(output)")
+            }
+        } catch {
+            return (false, error.localizedDescription)
+        }
     }
 }
 
@@ -105,27 +174,29 @@ public final class YouTubeResolver: @unchecked Sendable {
             canonicalUrl = "https://www.youtube.com/watch?v=\(vid)"
         } else if urlOrId.hasPrefix("http") {
             canonicalUrl = urlOrId
-            videoId = extractVideoId(from: urlOrId) ?? "youtube_media"
+            videoId = extractVideoId(from: urlOrId) ?? "universal_media"
         } else {
             return nil
         }
 
-        // Strategy 1: Resolve with yt-dlp + Node JS challenge solver (100% accurate formats and sizes)
+        // Strategy 1: Universal media resolution via yt-dlp + Node JS challenge solver (1,000+ sites)
         if let result = await resolveWithYtDlp(url: canonicalUrl, videoId: videoId) {
             return result
         }
 
-        // Strategy 2: Fallback to InnerTube client query
-        if let res = await queryInnerTube(videoId: videoId, clientName: "IOS", clientVersion: "19.29.1") {
-            return res
-        }
-        if let res = await queryInnerTube(videoId: videoId, clientName: "TVHTML5", clientVersion: "7.20240901.12.00") {
-            return res
+        // Strategy 2: Fallback to InnerTube client query for YouTube
+        if canonicalUrl.contains("youtube.com") || canonicalUrl.contains("youtu.be") {
+            if let res = await queryInnerTube(videoId: videoId, clientName: "IOS", clientVersion: "19.29.1") {
+                return res
+            }
+            if let res = await queryInnerTube(videoId: videoId, clientName: "TVHTML5", clientVersion: "7.20240901.12.00") {
+                return res
+            }
         }
         return nil
     }
 
-    // MARK: - yt-dlp Backend Resolution
+    // MARK: - Universal yt-dlp Backend Resolution
 
     private func resolveWithYtDlp(url: String, videoId: String) async -> YouTubeResolutionResult? {
         guard let python = YouTubeEngine.findBinary(named: "python3"),
@@ -172,12 +243,21 @@ public final class YouTubeResolver: @unchecked Sendable {
                 return nil
             }
 
-            let title = json["title"] as? String ?? "YouTube Video"
-            let channel = json["uploader"] as? String ?? json["channel"] as? String
+            let title = json["title"] as? String ?? "Media Stream"
+            let channel = json["uploader"] as? String ?? json["channel"] as? String ?? json["creator"] as? String
             let duration = json["duration"] as? Int
+            let thumbnail = json["thumbnail"] as? String
             let formats = json["formats"] as? [[String: Any]] ?? []
 
-            return parseYtDlpFormats(videoId: videoId, title: title, channel: channel, duration: duration, pageUrl: url, rawFormats: formats)
+            return parseYtDlpFormats(
+                videoId: videoId,
+                title: title,
+                channel: channel,
+                duration: duration,
+                thumbnail: thumbnail,
+                pageUrl: url,
+                rawFormats: formats
+            )
         } catch {
             return nil
         }
@@ -188,12 +268,11 @@ public final class YouTubeResolver: @unchecked Sendable {
         title: String,
         channel: String?,
         duration: Int?,
+        thumbnail: String?,
         pageUrl: String,
         rawFormats: [[String: Any]]
     ) -> YouTubeResolutionResult {
-        // Find best audio size
         var bestAudioSize: Int64 = 0
-        var bestAudioFormatId: String = "140"
         for f in rawFormats {
             let vcodec = f["vcodec"] as? String ?? ""
             let acodec = f["acodec"] as? String ?? ""
@@ -201,14 +280,14 @@ public final class YouTubeResolver: @unchecked Sendable {
                 let size = (f["filesize"] as? Int64) ?? (f["filesize_approx"] as? Int64) ?? 0
                 if size > bestAudioSize {
                     bestAudioSize = size
-                    bestAudioFormatId = f["format_id"] as? String ?? "140"
                 }
             }
         }
         if bestAudioSize == 0 {
-            bestAudioSize = 3_500_000 // Estimated 3.5 MB
+            bestAudioSize = 3_500_000
         }
 
+        let durationText = YouTubeEngine.formatSeconds(duration ?? 0)
         var streamOptions: [YouTubeStreamOption] = []
         let targetHeights = [2160, 1440, 1080, 720, 480, 360]
 
@@ -220,7 +299,6 @@ public final class YouTubeResolver: @unchecked Sendable {
             }
             guard !matches.isEmpty else { continue }
 
-            // Prefer MP4 container if available
             let chosen = matches.first { ($0["ext"] as? String) == "mp4" } ?? matches[0]
 
             let q = "\(targetH)p"
@@ -233,15 +311,15 @@ public final class YouTubeResolver: @unchecked Sendable {
 
             let label: String
             if targetH >= 2160 {
-                label = "YouTube 4K Ultra HD"
+                label = "4K Ultra HD"
             } else if targetH >= 1440 {
-                label = "YouTube 1440p 2K QHD"
+                label = "1440p 2K QHD"
             } else if targetH >= 1080 {
-                label = "YouTube 1080p Full HD"
+                label = "1080p Full HD"
             } else if targetH >= 720 {
-                label = "YouTube 720p HD"
+                label = "720p HD"
             } else {
-                label = "YouTube \(targetH)p"
+                label = "\(targetH)p"
             }
 
             let fpsSuffix = fps > 30 ? " (\(fps)fps)" : ""
@@ -269,7 +347,9 @@ public final class YouTubeResolver: @unchecked Sendable {
                 audioUrl: isMuxed ? nil : directUrl,
                 size: totalSize,
                 formattedSize: formattedSize,
-                formatId: formatId
+                formatId: formatId,
+                thumbnail: thumbnail,
+                duration: durationText
             ))
         }
 
@@ -287,7 +367,9 @@ public final class YouTubeResolver: @unchecked Sendable {
             audioUrl: nil,
             size: bestAudioSize,
             formattedSize: formattedAudioSize,
-            formatId: "bestaudio[ext=m4a]/bestaudio/best"
+            formatId: "bestaudio[ext=m4a]/bestaudio/best",
+            thumbnail: thumbnail,
+            duration: durationText
         ))
 
         streamOptions.append(YouTubeStreamOption(
@@ -302,7 +384,9 @@ public final class YouTubeResolver: @unchecked Sendable {
             audioUrl: nil,
             size: bestAudioSize,
             formattedSize: formattedAudioSize,
-            formatId: "bestaudio/best"
+            formatId: "bestaudio/best",
+            thumbnail: thumbnail,
+            duration: durationText
         ))
 
         return YouTubeResolutionResult(
@@ -310,6 +394,8 @@ public final class YouTubeResolver: @unchecked Sendable {
             title: title,
             channel: channel,
             durationSeconds: duration,
+            durationText: durationText,
+            thumbnail: thumbnail,
             streams: streamOptions
         )
     }
@@ -356,10 +442,19 @@ public final class YouTubeResolver: @unchecked Sendable {
             let title = videoDetails["title"] as? String ?? "YouTube Video"
             let channel = videoDetails["author"] as? String
             let durationSeconds = Int(videoDetails["lengthSeconds"] as? String ?? "0")
+            let thumbnail = (videoDetails["thumbnail"] as? [String: Any])?["thumbnails"] as? [[String: Any]]
+            let thumbUrl = thumbnail?.last?["url"] as? String
 
             guard let streamingData = json["streamingData"] as? [String: Any] else { return nil }
 
-            return parseStreamingData(videoId: videoId, title: title, channel: channel, durationSeconds: durationSeconds, streamingData: streamingData)
+            return parseStreamingData(
+                videoId: videoId,
+                title: title,
+                channel: channel,
+                durationSeconds: durationSeconds,
+                thumbnail: thumbUrl,
+                streamingData: streamingData
+            )
         } catch {
             return nil
         }
@@ -370,6 +465,7 @@ public final class YouTubeResolver: @unchecked Sendable {
         title: String,
         channel: String?,
         durationSeconds: Int?,
+        thumbnail: String?,
         streamingData: [String: Any]
     ) -> YouTubeResolutionResult {
         let formats = streamingData["formats"] as? [[String: Any]] ?? []
@@ -390,15 +486,15 @@ public final class YouTubeResolver: @unchecked Sendable {
             }
         }
 
+        let durationText = YouTubeEngine.formatSeconds(durationSeconds ?? 0)
         var streamOptions: [YouTubeStreamOption] = []
         var seenQualities = Set<String>()
 
-        // 1. Progressive formats (itag 22: 720p, itag 18: 360p)
+        // 1. Progressive formats (720p, 360p)
         for f in formats {
             guard let url = f["url"] as? String, !url.isEmpty else { continue }
             let itag = f["itag"] as? Int ?? 0
             let qLabel = f["qualityLabel"] as? String ?? (itag == 22 ? "720p" : "360p")
-            // CRITICAL FIX: never replace "60" alone as it turns "360p" into "3p"!
             let shortQ = qLabel
                 .replacingOccurrences(of: "60fps", with: "", options: .caseInsensitive)
                 .replacingOccurrences(of: "50fps", with: "", options: .caseInsensitive)
@@ -425,11 +521,13 @@ public final class YouTubeResolver: @unchecked Sendable {
                 audioUrl: nil,
                 size: size,
                 formattedSize: formattedSize,
-                formatId: String(itag)
+                formatId: String(itag),
+                thumbnail: thumbnail,
+                duration: durationText
             ))
         }
 
-        // 2. High-res Adaptive video formats (1080p, 720p, 480p, 360p)
+        // 2. Adaptive formats
         for f in adaptive {
             let mime = f["mimeType"] as? String ?? ""
             guard mime.contains("video/mp4") || mime.contains("video/webm") else { continue }
@@ -463,7 +561,9 @@ public final class YouTubeResolver: @unchecked Sendable {
                 audioUrl: bestAudioUrl,
                 size: totalEstSize,
                 formattedSize: formattedSize,
-                formatId: "bestvideo[height<=\(height)]+bestaudio/best[height<=\(height)]/best"
+                formatId: "bestvideo[height<=\(height)]+bestaudio/best[height<=\(height)]/best",
+                thumbnail: thumbnail,
+                duration: durationText
             ))
         }
 
@@ -482,11 +582,12 @@ public final class YouTubeResolver: @unchecked Sendable {
                 audioUrl: nil,
                 size: bestAudioSize,
                 formattedSize: formattedAudioSize,
-                formatId: "bestaudio[ext=m4a]/bestaudio/best"
+                formatId: "bestaudio[ext=m4a]/bestaudio/best",
+                thumbnail: thumbnail,
+                duration: durationText
             ))
         }
 
-        // Sort: 1080p first, then 720p, 480p, 360p, then audio
         streamOptions.sort { a, b in
             if a.type == "video" && b.type == "audio" { return true }
             if a.type == "audio" && b.type == "video" { return false }
@@ -500,6 +601,8 @@ public final class YouTubeResolver: @unchecked Sendable {
             title: title,
             channel: channel,
             durationSeconds: durationSeconds,
+            durationText: durationText,
+            thumbnail: thumbnail,
             streams: streamOptions
         )
     }

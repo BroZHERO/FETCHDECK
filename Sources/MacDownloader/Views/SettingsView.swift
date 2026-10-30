@@ -6,16 +6,16 @@ public struct SettingsView: View {
     @ObservedObject var manager = DownloadManager.shared
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 18) {
             HStack {
                 Image(systemName: "gearshape.fill")
                     .font(.system(size: 24))
                     .foregroundColor(.blue)
 
-                VStack(alignment: .leading) {
-                    Text("Preferences")
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("FETCHDECK Preferences")
                         .font(.headline)
-                    Text("Configure download acceleration and Chrome extension bridge")
+                    Text("Configure acceleration, engine auto-updates, and browser bridge")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -23,13 +23,14 @@ public struct SettingsView: View {
                 Button("Done") {
                     dismiss()
                 }
+                .keyboardShortcut(.defaultAction)
             }
 
             Divider()
 
             Form {
                 Section("Download Acceleration") {
-                    Picker("Default Connections per Download:", selection: $manager.defaultConnections) {
+                    Picker("Default Parallel Streams:", selection: $manager.defaultConnections) {
                         Text("1 (Single stream)").tag(1)
                         Text("4 Chunks").tag(4)
                         Text("8 Chunks (IDM Recommended)").tag(8)
@@ -56,16 +57,63 @@ public struct SettingsView: View {
                     }
                 }
 
-                Section("Chrome Extension Integration") {
+                Section("Extraction Engine (1,000+ Sites)") {
                     HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(Color.green)
+                                    .frame(width: 7, height: 7)
+                                Text("yt-dlp Engine Version: \(manager.engineVersion)")
+                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            }
+                            Text("Challenge Solver: Node.js • Multiplexer: FFmpeg")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+
+                        Spacer()
+
+                        Button {
+                            manager.updateExtractionEngine()
+                        } label: {
+                            if manager.isUpdatingEngine {
+                                ProgressView()
+                                    .scaleEffect(0.6)
+                            } else {
+                                Text("Check for Updates")
+                            }
+                        }
+                        .disabled(manager.isUpdatingEngine)
+                    }
+
+                    if let msg = manager.engineUpdateMessage {
+                        Text(msg)
+                            .font(.system(size: 10.5))
+                            .foregroundColor(msg.contains("✓") ? .green : .blue)
+                    }
+                }
+
+                Section("Smart Sleep & Network") {
+                    HStack(spacing: 8) {
+                        Image(systemName: "bolt.shield")
+                            .foregroundColor(.blue)
+                        Text("Auto-pauses active downloads when Mac sleeps; resumes automatically on wake.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                Section("Browser Extension Bridge") {
+                    HStack(spacing: 6) {
                         Circle()
                             .fill(Color.green)
-                            .frame(width: 8, height: 8)
-                        Text("Local Extension Bridge is active on port 45678 (127.0.0.1:45678)")
+                            .frame(width: 7, height: 7)
+                        Text("Bridge active on port 45678 (127.0.0.1:45678)")
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
                     }
-                    Text("The Chrome extension automatically sends clicked video and audio streams directly to this listener.")
+                    Text("Compatible with Chrome, Brave, Edge, and Chromium browsers.")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
@@ -73,8 +121,8 @@ public struct SettingsView: View {
 
             Spacer()
         }
-        .padding(24)
-        .frame(width: 500, height: 380)
+        .padding(22)
+        .frame(width: 520, height: 490)
     }
 
     private func selectFolder() {

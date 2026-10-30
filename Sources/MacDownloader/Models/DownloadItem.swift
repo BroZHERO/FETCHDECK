@@ -55,6 +55,8 @@ public struct DownloadItem: Identifiable, Codable, Sendable {
     public var quality: String?
     public var audioUrl: URL?
     public var resolutionDetails: String?
+    public var thumbnailURL: URL?
+    public var duration: String?
 
     public init(
         id: UUID = UUID(),
@@ -76,12 +78,16 @@ public struct DownloadItem: Identifiable, Codable, Sendable {
         cookie: String? = nil,
         quality: String? = nil,
         audioUrl: URL? = nil,
-        resolutionDetails: String? = nil
+        resolutionDetails: String? = nil,
+        thumbnailURL: URL? = nil,
+        duration: String? = nil
     ) {
         self.id = id
         self.url = url
         self.audioUrl = audioUrl
         self.resolutionDetails = resolutionDetails
+        self.thumbnailURL = thumbnailURL
+        self.duration = duration
         var defaultName = url.lastPathComponent.isEmpty ? "download" : url.lastPathComponent
         if defaultName.contains("?") {
             defaultName = defaultName.components(separatedBy: "?").first ?? defaultName

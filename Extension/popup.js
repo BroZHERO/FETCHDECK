@@ -114,13 +114,13 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (btnElement) btnElement.innerText = "✓ Sent";
         if (feedbackTarget) {
           feedbackTarget.style.color = "#34c759";
-          feedbackTarget.innerText = "Sent to MacDownloader!";
+          feedbackTarget.innerText = "Sent to FETCHDECK!";
         }
       } else {
         if (btnElement) btnElement.innerText = "Failed";
         if (feedbackTarget) {
           feedbackTarget.style.color = "#ff3b30";
-          feedbackTarget.innerText = `Failed: ${(res && res.error) || "Is MacDownloader app running?"}`;
+          feedbackTarget.innerText = `Failed: ${(res && res.error) || "Is FETCHDECK app running?"}`;
         }
       }
     });

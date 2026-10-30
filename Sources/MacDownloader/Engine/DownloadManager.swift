@@ -1,5 +1,7 @@
 import Foundation
 import Combine
+import AppKit
+import Network
 
 @MainActor
 public class DownloadManager: ObservableObject {
@@ -15,7 +17,19 @@ public class DownloadManager: ObservableObject {
     // UI Presentation State
     @Published public var showingAddSheet: Bool = false
     @Published public var showingSettingsSheet: Bool = false
+    @Published public var showingAboutSheet: Bool = false
     @Published public var selectedDetailItem: DownloadItem? = nil
+
+    // Extraction Engine State
+    @Published public var engineVersion: String = "2026.10.26"
+    @Published public var isUpdatingEngine: Bool = false
+    @Published public var engineUpdateMessage: String? = nil
+
+    // Smart Sleep & Network State
+    @Published public var isNetworkConnected: Bool = true
+    private var preSleepActiveIDs: Set<UUID> = []
+    private let pathMonitor = NWPathMonitor()
+    private let monitorQueue = DispatchQueue(label: "com.fetchdeck.networkmonitor")
 
     private var downloaders: [UUID: SegmentedDownloader] = [:]
     private let storageURL: URL
@@ -26,11 +40,15 @@ public class DownloadManager: ObservableObject {
         self.defaultDownloadFolder = downloads
 
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("MacDownloader")
+            .appendingPathComponent("FetchDeck")
         try? fileManager.createDirectory(at: appSupport, withIntermediateDirectories: true)
         self.storageURL = appSupport.appendingPathComponent("downloads.json")
 
         loadPersistedItems()
+        self.engineVersion = YouTubeEngine.getEngineVersion()
+
+        setupSleepWakeHandlers()
+        setupNetworkMonitor()
     }
 
     public var filteredItems: [DownloadItem] {
@@ -77,6 +95,133 @@ public class DownloadManager: ObservableObject {
         items.filter { $0.status == .downloading }.count
     }
 
+    // MARK: - Smart Sleep & Network Reconnection
+
+    private func setupSleepWakeHandlers() {
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.handleSystemSleep()
+            }
+        }
+
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.handleSystemWake()
+            }
+        }
+    }
+
+    private func handleSystemSleep() {
+        preSleepActiveIDs = Set(items.filter { $0.status == .downloading }.map { $0.id })
+        for id in preSleepActiveIDs {
+            pauseDownload(id: id)
+        }
+    }
+
+    private func handleSystemWake() {
+        // Wait 3 seconds for network adapters and WiFi to re-negotiate
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+            guard let self = self else { return }
+            for id in self.preSleepActiveIDs {
+                if let item = self.items.first(where: { $0.id == id }), item.status == .paused {
+                    self.startDownload(id: id)
+                }
+            }
+            self.preSleepActiveIDs.removeAll()
+        }
+    }
+
+    private func setupNetworkMonitor() {
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                let wasConnected = self.isNetworkConnected
+                self.isNetworkConnected = (path.status == .satisfied)
+                if !wasConnected && self.isNetworkConnected {
+                    self.resumeInterruptedDownloads()
+                }
+            }
+        }
+        pathMonitor.start(queue: monitorQueue)
+    }
+
+    private func resumeInterruptedDownloads() {
+        for item in items where item.status == .failed {
+            startDownload(id: item.id)
+        }
+    }
+
+    // MARK: - Extraction Engine Self-Updater
+
+    public func updateExtractionEngine() {
+        guard !isUpdatingEngine else { return }
+        isUpdatingEngine = true
+        engineUpdateMessage = "Checking and downloading latest engine..."
+
+        Task.detached {
+            let (success, message) = await YouTubeEngine.updateEngine()
+            let newVersion = YouTubeEngine.getEngineVersion()
+            await MainActor.run {
+                self.isUpdatingEngine = false
+                self.engineVersion = newVersion
+                self.engineUpdateMessage = success ? "✓ Up-to-date (\(newVersion))" : "Update notice: \(message)"
+            }
+        }
+    }
+
+    // MARK: - Audio Extraction Preset
+
+    public func extractAudioAsMP3(for itemID: UUID) {
+        guard let item = items.first(where: { $0.id == itemID }), item.status == .completed else { return }
+        guard let ffmpeg = YouTubeEngine.findBinary(named: "ffmpeg") else { return }
+
+        let sourceFile = item.destinationFileURL
+        let mp3File = sourceFile.deletingPathExtension().appendingPathExtension("mp3")
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: ffmpeg)
+        process.arguments = [
+            "-y",
+            "-i", sourceFile.path,
+            "-vn",
+            "-acodec", "libmp3lame",
+            "-q:a", "0",
+            mp3File.path
+        ]
+
+        Task.detached {
+            try? process.run()
+            process.waitUntilExit()
+            if process.terminationStatus == 0 {
+                let size = (try? FileManager.default.attributesOfItem(atPath: mp3File.path)[.size] as? Int64) ?? -1
+                await MainActor.run {
+                    let newItem = self.addDownload(
+                        url: mp3File,
+                        filename: mp3File.lastPathComponent,
+                        quality: "MP3 320k",
+                        resolutionDetails: "High Quality MP3",
+                        category: .audio,
+                        autoStart: false
+                    )
+                    if let idx = self.items.firstIndex(where: { $0.id == newItem.id }) {
+                        self.items[idx].status = .completed
+                        self.items[idx].fileSize = size
+                        self.items[idx].downloadedBytes = size
+                        self.persistItems()
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: - Download Operations
 
     @discardableResult
@@ -91,23 +236,39 @@ public class DownloadManager: ObservableObject {
         quality: String? = nil,
         audioUrl: URL? = nil,
         resolutionDetails: String? = nil,
+        thumbnailURL: URL? = nil,
+        duration: String? = nil,
+        category: DownloadCategory = .other,
         autoStart: Bool = true
     ) -> DownloadItem {
-        let name = filename?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? filename! : (url.lastPathComponent.isEmpty ? "download_\(Int(Date().timeIntervalSince1970))" : url.lastPathComponent)
+        let name = filename?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? filename!
+            : (url.lastPathComponent.isEmpty ? "download_\(Int(Date().timeIntervalSince1970))" : url.lastPathComponent)
         let folder = destinationFolder ?? defaultDownloadFolder
         let conn = connections ?? defaultConnections
+
+        // Smart thumbnail auto-detection for YouTube if missing
+        var finalThumb = thumbnailURL
+        if finalThumb == nil {
+            if let videoId = YouTubeResolver.shared.extractVideoId(from: url.absoluteString) ?? (referer != nil ? YouTubeResolver.shared.extractVideoId(from: referer!) : nil) {
+                finalThumb = URL(string: "https://img.youtube.com/vi/\(videoId)/hqdefault.jpg")
+            }
+        }
 
         let item = DownloadItem(
             url: url,
             filename: name,
             destinationFolder: folder,
             connectionCount: conn,
+            category: category,
             referer: referer,
             userAgent: userAgent,
             cookie: cookie,
             quality: quality,
             audioUrl: audioUrl,
-            resolutionDetails: resolutionDetails
+            resolutionDetails: resolutionDetails,
+            thumbnailURL: finalThumb,
+            duration: duration
         )
 
         items.insert(item, at: 0)
@@ -124,7 +285,6 @@ public class DownloadManager: ObservableObject {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
         var item = items[index]
 
-        // Check concurrency cap
         if activeDownloadsCount >= maxConcurrentDownloads && item.status != .downloading {
             items[index].status = .queued
             persistItems()
@@ -234,6 +394,8 @@ public class DownloadManager: ObservableObject {
             } else if items[index].fileSize > 0 {
                 items[index].downloadedBytes = items[index].fileSize
             }
+            // Trigger native notification
+            triggerNotification(for: items[index])
         case .failure(let error):
             items[index].status = .failed
             items[index].speed = 0
@@ -245,6 +407,15 @@ public class DownloadManager: ObservableObject {
         processNextInQueue()
     }
 
+    private func triggerNotification(for item: DownloadItem) {
+        let notification = NSUserNotification()
+        notification.title = "Download Complete"
+        notification.subtitle = item.filename
+        notification.informativeText = "Ready in your Downloads folder."
+        notification.soundName = NSUserNotificationDefaultSoundName
+        NSUserNotificationCenter.default.deliver(notification)
+    }
+
     private func processNextInQueue() {
         guard activeDownloadsCount < maxConcurrentDownloads else { return }
         if let nextQueued = items.first(where: { $0.status == .queued }) {
@@ -252,32 +423,20 @@ public class DownloadManager: ObservableObject {
         }
     }
 
-    // MARK: - Persistence
-
-    private func persistItems() {
-        do {
-            let data = try JSONEncoder().encode(items)
-            try data.write(to: storageURL)
-        } catch {
-            print("Failed to save downloads: \(error)")
-        }
-    }
+    // MARK: - State Persistence
 
     private func loadPersistedItems() {
-        guard FileManager.default.fileExists(atPath: storageURL.path) else { return }
-        do {
-            let data = try Data(contentsOf: storageURL)
-            var loaded = try JSONDecoder().decode([DownloadItem].self, from: data)
-            // Reset downloading items to paused on app launch
-            for i in 0..<loaded.count {
-                if loaded[i].status == .downloading {
-                    loaded[i].status = .paused
-                    loaded[i].speed = 0
-                }
-            }
-            self.items = loaded
-        } catch {
-            print("Failed to load downloads: \(error)")
+        guard FileManager.default.fileExists(atPath: storageURL.path),
+              let data = try? Data(contentsOf: storageURL),
+              let loaded = try? JSONDecoder().decode([DownloadItem].self, from: data) else {
+            return
+        }
+        self.items = loaded.map { var it = $0; if it.status == .downloading { it.status = .paused }; return it }
+    }
+
+    private func persistItems() {
+        if let data = try? JSONEncoder().encode(items) {
+            try? data.write(to: storageURL, options: .atomic)
         }
     }
 }

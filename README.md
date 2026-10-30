@@ -1,96 +1,121 @@
-# MacDownloader (IDM Alternative for Apple Silicon Mac Mini M4)
-
-A high-performance, native macOS download accelerator engineered specifically for Apple Silicon (M4 / arm64) with full companion Google Chrome extension integration.
-
-Inspired by the architecture of **Internet Download Manager (IDM)**, this system delivers multi-segment parallel accelerated downloads, pause/resume state management, real-time chunk visualization, and media stream sniffing for videos and audio.
+# FETCHDECK
+> **[Your downloads, all in one place.]**  
+> *Vibecoded by Abishek [@brozhero](https://github.com/brozhero)*
 
 ---
 
-## 🌟 Key Features
+**FETCHDECK** is a high-performance, native macOS media accelerator engineered for Apple Silicon (M-Series / arm64) with macOS Sequoia glassmorphic aesthetics and a companion Chrome extension.
 
-### 🚀 Native macOS App (SwiftUI & Apple Silicon Native)
-- **Multi-Connection Segmented Acceleration**: Partitions downloads into parallel worker chunks (configurable to 1, 4, 8, 16, or 32 connections) using HTTP `Range: bytes=` requests.
-- **IDM-Style Segment Visualizer Bar**: Dynamic multi-color connection bar displaying the real-time download progress of each individual byte chunk.
-- **Smart Pause & Resume**: Saves chunk offsets and byte markers. Resumes downloads without losing completed segments.
-- **Automatic Category Sorting**: Automatically classifies downloads into Video, Audio, Compressed (Zip/DMG), Documents, and Other.
-- **Local Extension Bridge (Zero-Config)**: Embedded lightweight HTTP daemon running on `127.0.0.1:45678` using Apple's `Network.framework` (`NWListener`). No complex Native Messaging manifests required.
-- **Queue Management**: Auto-starts downloads, respects maximum concurrent download limits, and persists task states across application restarts.
-
-### 🌐 Google Chrome Extension (Manifest V3)
-- **Floating Media Download Overlay**: Detects HTML5 `<video>` and `<audio>` elements on any webpage and renders an IDM-style hovering download pill in the top-right corner.
-- **Network Stream Sniffer**: Background service worker monitors HTTP responses for media MIME types (`video/mp4`, `video/webm`, `application/x-mpegURL`, `audio/mpeg`, etc.).
-- **Popup Media Hub**: Shows all media files and streams detected on the active browser tab with one-click download buttons.
-- **Context Menu Integration**: Right-click any link, video, audio, or image -> "Download with MacDownloader".
-- **Instant Dispatch**: Transmits the media URL, document title, page referrer, and user-agent directly to `MacDownloader.app`.
+Inspired by the speed of **Internet Download Manager (IDM)** and the media aesthetics of **Downie**, FETCHDECK combines multi-chunk parallel download acceleration, automatic audio extraction, live video thumbnails, universal support for 1,000+ websites, and seamless sleep/wake reconnection into a unified, fluid experience.
 
 ---
 
-## 📁 Project Structure
+## ✨ Highlights & Features
+
+### 💎 macOS Sequoia Glassmorphic Aesthetics
+- Translucent `.ultraThinMaterial` backgrounds, rounded cards, and glowing accent borders.
+- Custom macOS glassmorphic app icon rendered natively for Retina and Dock displays.
+- Segmented status badges with glowing resolution pills (4K, 1080p, 720p, 360p, MP3).
+
+### 🎬 Rich Video Thumbnails (The Downie Effect)
+- High-definition 16:9 video preview thumbnails rendered asynchronously for every stream.
+- Inset duration badges (e.g. `03:45`) and channel/creator metadata badges.
+- Instant fallback resolution using YouTube high-res poster caches.
+
+### 🌐 Universal 1,000+ Site Support
+- One-click downloads for **YouTube, TikTok, Instagram Reels, Twitter/X, Reddit, Vimeo, SoundCloud**, and generic HLS/DASH/MP4 web streams.
+- Client challenge resolver with embedded Node.js runtime and InnerTube fallback strategies.
+
+### 🎵 1-Click Audio Extraction Presets
+- Convert and extract any video stream into **High-Quality MP3 (320 kbps)** or **Original M4A Audio** via built-in FFmpeg processing.
+- Available directly from the "Add Download" modal and via right-click contextual menus on completed videos.
+
+### ⚡ IDM-Grade Multi-Segment Parallel Acceleration
+- Splits files into 1, 4, 8, 16, or 32 concurrent HTTP range chunks.
+- **Segment Visualizer**: Real-time graphical visualization of active chunks downloading in parallel.
+- Resilient byte-level pause and resume capabilities.
+
+### 🔄 Automatic Engine Self-Updater
+- Keep video extractors current with single-click updates in Settings and About sheets.
+- Directly invokes `yt-dlp -U` with version reporting and status monitoring.
+
+### 🌙 Smart Sleep & Network Reconnection
+- **Auto-Pause on Sleep**: Catches `NSWorkspace.willSleepNotification` and safely suspends all active chunk streams.
+- **Auto-Resume on Wake**: Debounces 3 seconds on `NSWorkspace.didWakeNotification` to allow Wi-Fi adapters to reconnect, then seamlessly resumes queued and downloading files.
+- **Live Network Monitor**: Employs `NWPathMonitor` to detect dropouts and automatically retry interrupted connections.
+
+---
+
+## 🏗️ Architecture
 
 ```
-MacDownloader/
-├── MacDownloader.app/               # Compiled & code-signed standalone macOS Application
-├── Sources/
-│   └── MacDownloader/
-│       ├── MacDownloader.swift      # App entry point & NSApplicationDelegate
-│       ├── Models/
-│       │   ├── DownloadItem.swift   # Task model & categories
-│       │   └── DownloadSegment.swift# Individual chunk range model
-│       ├── Engine/
-│       │   ├── SegmentedDownloader.swift # Parallel HTTP chunk fetcher & file merger
-│       │   └── DownloadManager.swift     # Queue manager & persistence
-│       ├── Server/
-│       │   └── LocalApiServer.swift      # Embedded NWListener HTTP bridge (127.0.0.1:45678)
-│       └── Views/
-│           ├── ContentView.swift         # Main NavigationSplitView & status bar
-│           ├── SidebarView.swift         # Categories & status filters with badges
-│           ├── DownloadRowView.swift     # List item with IDM segment visualizer
-│           ├── SegmentVisualizerView.swift# Multi-chunk graphical progress bar
-│           ├── NewDownloadSheet.swift    # Add URL sheet with auto-clipboard check
-│           ├── NewDownloadViewModel.swift# Clean MVVM form model
-│           ├── DownloadDetailSheet.swift # Detailed chunk inspector
-│           └── SettingsView.swift        # Preferences & acceleration limits
+FETCHDECK/
+├── FetchDeck.app/                   # Standalone compiled and signed macOS application
+├── Sources/MacDownloader/
+│   ├── MacDownloader.swift          # App entry point & NSApplicationDelegate
+│   ├── Models/
+│   │   ├── DownloadItem.swift       # Download item model with thumbnails & duration
+│   │   └── DownloadSegment.swift    # Byte chunk model
+│   ├── Engine/
+│   │   ├── SegmentedDownloader.swift# Multi-chunk HTTP range downloader
+│   │   ├── DownloadManager.swift    # Queue, sleep/wake, NWPathMonitor, MP3 conversion
+│   │   └── YouTubeResolver.swift    # Universal yt-dlp & InnerTube extraction engine
+│   ├── Server/
+│   │   └── LocalApiServer.swift     # Embedded zero-config HTTP daemon (127.0.0.1:45678)
+│   └── Views/
+│       ├── ContentView.swift        # Main NavigationSplitView
+│       ├── SidebarView.swift        # Category filter with live engine version & network status
+│       ├── DownloadRowView.swift    # Downie-style card with thumbnail & segment visualizer
+│       ├── SegmentVisualizerView.swift# Multi-threaded chunk bar
+│       ├── NewDownloadSheet.swift   # Glassmorphic URL modal with Audio Presets
+│       ├── AboutView.swift          # Glassmorphic about sheet with creator credits
+│       └── SettingsView.swift       # Preferences and Engine Updater
 ├── Extension/
-│   ├── manifest.json                # Manifest V3 specification
-│   ├── content.js                   # Video/audio player overlay injection
-│   ├── overlay.css                  # Floating button styles
-│   ├── background.js                # Web request sniffer & context menus
-│   ├── popup.html                   # Extension popup UI
-│   ├── popup.js                     # Sniffed media display & status checking
-│   ├── popup.css                    # Dark mode popup stylesheet
+│   ├── manifest.json                # Chrome Manifest V3
+│   ├── content.js                   # Universal in-page floating FetchDeck button
+│   ├── overlay.css                  # Sequoia glassmorphic floating pill styles
+│   ├── background.js                # Media stream sniffer & local bridge dispatcher
+│   ├── popup.html                   # Extension popup hub
 │   └── icons/                       # App and extension icons (16, 48, 128)
 ├── Scripts/
-│   └── build_app.sh                 # Release compilation & bundle packager
+│   └── build_app.sh                 # Native Apple Silicon release compilation script
 └── Package.swift                    # Swift Package Manager configuration
 ```
 
 ---
 
-## 🛠 How to Use
+## 🚀 Getting Started
 
-### 1. Launching the Mac Application
-The pre-compiled app is located in `MacDownloader.app`. You can launch it directly from Terminal:
+### 1. Launching FETCHDECK
+The compiled application is located in your Applications folder and workspace:
 ```bash
-open /Users/abishekwork/.gemini/antigravity/scratch/MacDownloader/MacDownloader.app
+# Launch directly from Applications:
+open ~/Applications/FetchDeck.app
+
+# Or from the workspace build:
+open FetchDeck.app
 ```
-*(Or drag `MacDownloader.app` into your macOS `/Applications` folder.)*
 
-To re-build or modify the code:
+To recompile or package from source:
 ```bash
-cd /Users/abishekwork/.gemini/antigravity/scratch/MacDownloader
 ./Scripts/build_app.sh
 ```
 
-### 2. Installing the Google Chrome Extension
-1. Open Google Chrome and navigate to:
+### 2. Installing the Chrome Companion Extension
+1. Open Google Chrome and visit: `chrome://extensions`
+2. Toggle on **Developer mode** in the top-right corner.
+3. Click **Load unpacked** in the top-left corner.
+4. Select the `Extension` folder:
    ```
-   chrome://extensions
+   MacDownloader/Extension
    ```
-2. In the top-right corner, turn ON **Developer mode**.
-3. In the top-left corner, click **Load unpacked**.
-4. In the file dialog, choose the `Extension` directory:
-   ```
-   /Users/abishekwork/.gemini/antigravity/scratch/MacDownloader/Extension
-   ```
-5. The **MacDownloader** icon will appear in your Chrome toolbar.
-6. Open any webpage containing videos or audio (e.g. YouTube, Vimeo, HTML5 video). A floating **"Download Video"** button will hover over the video. Clicking it immediately dispatches the file to your Mac app!
+5. Navigate to any video site (e.g. YouTube, Vimeo, TikTok).
+6. Click the hovering **FetchDeck** button to choose your resolution, or use the extension toolbar popup to trigger instant multi-chunk acceleration.
+
+---
+
+## 🛡️ License
+
+Released under the MIT License. Crafted with precision for macOS Sequoia.
+
+**FETCHDECK** — Vibecoded by Abishek [@brozhero](https://github.com/brozhero).

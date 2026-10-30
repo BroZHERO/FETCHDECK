@@ -98,7 +98,22 @@ public final class LocalApiServer: @unchecked Sendable {
 
         // Endpoint: Status check
         if method == "GET" && path == "/api/status" {
-            let body = "{\"status\":\"running\",\"app\":\"MacDownloader\",\"version\":\"1.0.0\"}"
+            let body = "{\"status\":\"running\",\"app\":\"FETCHDECK\",\"version\":\"1.0.0\",\"tagline\":\"Your downloads, all in one place.\"}"
+            return makeHttpResponse(status: 200, body: body)
+        }
+
+        // Endpoint: Extraction engine version
+        if method == "GET" && path == "/api/engine/version" {
+            let ver = YouTubeEngine.getEngineVersion()
+            let body = "{\"version\":\"\(ver)\"}"
+            return makeHttpResponse(status: 200, body: body)
+        }
+
+        // Endpoint: Extraction engine self-update
+        if method == "POST" && path == "/api/engine/update" {
+            let (success, message) = await YouTubeEngine.updateEngine()
+            let safeMsg = message.replacingOccurrences(of: "\"", with: "\\\"").replacingOccurrences(of: "\n", with: " ")
+            let body = "{\"success\":\(success),\"message\":\"\(safeMsg)\"}"
             return makeHttpResponse(status: 200, body: body)
         }
 
@@ -149,6 +164,9 @@ public final class LocalApiServer: @unchecked Sendable {
                         let resolutionDetails = json["dimensions"] as? String ?? json["resolutionDetails"] as? String
                         let audioUrlString = json["audioUrl"] as? String
                         let audioUrl = audioUrlString != nil ? URL(string: audioUrlString!) : nil
+                        let thumbnailString = (json["thumbnail"] as? String) ?? (json["thumbnailUrl"] as? String)
+                        let thumbnailURL = thumbnailString != nil ? URL(string: thumbnailString!) : nil
+                        let duration = json["duration"] as? String
 
                         Task { @MainActor in
                             DownloadManager.shared.addDownload(
@@ -160,6 +178,8 @@ public final class LocalApiServer: @unchecked Sendable {
                                 quality: quality,
                                 audioUrl: audioUrl,
                                 resolutionDetails: resolutionDetails,
+                                thumbnailURL: thumbnailURL,
+                                duration: duration,
                                 autoStart: true
                             )
                         }

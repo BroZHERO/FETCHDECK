@@ -31,7 +31,7 @@ const YOUTUBE_ITAGS = {
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: "macdl-download-link",
-    title: "Download with MacDownloader",
+    title: "Download with FETCHDECK",
     contexts: ["link", "video", "audio", "image"]
   });
 });

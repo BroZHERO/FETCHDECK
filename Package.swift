@@ -9,7 +9,10 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "MacDownloader",
-            path: "Sources/MacDownloader"
+            path: "Sources/MacDownloader",
+            resources: [
+                .process("Resources")
+            ]
         ),
         .testTarget(
             name: "MacDownloaderTests",
