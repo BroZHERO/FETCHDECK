@@ -1,0 +1,25 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Swift Package Manager & Xcode
+/.build
+/Packages
+xcuserdata/
+DerivedData/
+.swiftpm/configuration/registries.json
+.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+
+# Compiled Application Bundles
+*.app
+MacDownloader.app/
+
+# Virtual Environments & Binaries
+venv/
+bin/
+*.part*
+
+# Credentials & Temp
+.netrc
+*.log

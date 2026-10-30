@@ -1,0 +1,292 @@
+/* MacDownloader Floating Media Badge & Dropdown */
+.macdl-overlay-container {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2147483647 !important;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  pointer-events: auto;
+}
+
+.macdl-download-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 14px;
+  background: rgba(24, 24, 28, 0.88);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  color: #ffffff !important;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  text-decoration: none;
+  user-select: none;
+  opacity: 0.25;
+  transition: opacity 0.2s ease, transform 0.2s ease, background 0.2s ease;
+}
+
+.macdl-overlay-container:hover .macdl-download-btn,
+.macdl-download-btn.macdl-active {
+  opacity: 1.0 !important;
+  transform: translateY(-1px);
+}
+
+.macdl-download-btn:hover {
+  background: #007aff !important;
+  border-color: #007aff;
+  box-shadow: 0 6px 20px rgba(0, 122, 255, 0.5);
+}
+
+.macdl-download-btn.macdl-success {
+  background: #34c759 !important;
+  border-color: #34c759;
+  opacity: 1.0 !important;
+}
+
+.macdl-download-btn.macdl-error {
+  background: #ff3b30 !important;
+  border-color: #ff3b30;
+  opacity: 1.0 !important;
+}
+
+.macdl-icon {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+}
+
+.macdl-spinner {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: #ffffff;
+  animation: macdl-spin 0.6s linear infinite;
+}
+
+@keyframes macdl-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* IDM-Style Quality Selector Popover */
+.macdl-dropdown {
+  position: absolute;
+  top: 36px;
+  right: 0;
+  width: 400px;
+  background: rgba(26, 26, 30, 0.96);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 2147483647;
+  animation: macdl-fade-in 0.18s ease-out;
+}
+
+@keyframes macdl-fade-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.macdl-dropdown-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 6px 6px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #98989f;
+}
+
+.macdl-close-btn {
+  background: transparent;
+  border: none;
+  color: #98989f;
+  font-size: 15px;
+  cursor: pointer;
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+
+.macdl-close-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.macdl-dropdown-list {
+  max-height: 280px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.macdl-dropdown-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: #f2f2f7;
+  transition: all 0.12s ease;
+}
+
+.macdl-dropdown-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.macdl-item-left {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow: hidden;
+  max-width: 230px;
+}
+
+.macdl-item-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.macdl-title-text {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.macdl-res-badge {
+  padding: 1.5px 6px;
+  border-radius: 4px;
+  font-weight: 800;
+  font-size: 10px;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+
+.macdl-badge-1080p { background: rgba(0, 122, 255, 0.35); color: #60a5fa; border: 1px solid rgba(96, 165, 250, 0.3); }
+.macdl-badge-720p { background: rgba(20, 184, 166, 0.35); color: #2dd4bf; border: 1px solid rgba(45, 212, 191, 0.3); }
+.macdl-badge-480p { background: rgba(168, 85, 247, 0.35); color: #c084fc; border: 1px solid rgba(192, 132, 252, 0.3); }
+.macdl-badge-360p { background: rgba(245, 158, 11, 0.35); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.3); }
+.macdl-badge-audio { background: rgba(236, 72, 153, 0.35); color: #f472b6; border: 1px solid rgba(244, 114, 182, 0.3); }
+.macdl-badge-generic { background: rgba(156, 163, 175, 0.35); color: #e5e7eb; border: 1px solid rgba(229, 231, 235, 0.3); }
+
+.macdl-item-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: #98989f;
+  flex-wrap: wrap;
+}
+
+.macdl-meta-pill {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 9.5px;
+  color: #d1d5db;
+}
+
+.macdl-pill-green {
+  color: #34d399;
+  font-weight: 600;
+}
+
+.macdl-pill-blue {
+  color: #60a5fa;
+}
+
+.macdl-meta-size {
+  font-weight: 600;
+  color: #f3f4f6;
+  margin-left: 2px;
+}
+
+.macdl-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.macdl-btn-action {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 5px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: none;
+  transition: all 0.12s ease;
+  white-space: nowrap;
+}
+
+.macdl-btn-app {
+  background: #007aff;
+  color: #ffffff;
+}
+
+.macdl-btn-app:hover {
+  background: #0062cc;
+  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.4);
+}
+
+.macdl-btn-browser {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.macdl-btn-browser:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.macdl-empty-notice {
+  padding: 16px 12px;
+  font-size: 11.5px;
+  color: #98989f;
+  text-align: center;
+  line-height: 1.6;
+}
+
+.macdl-loading-box {
+  padding: 22px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #d1d5db;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: center;
+}
+
+.macdl-loading-spinner {
+  width: 22px;
+  height: 22px;
+  border: 2.5px solid rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+  border-top-color: #007aff;
+  animation: macdl-spin 0.6s linear infinite;
+}

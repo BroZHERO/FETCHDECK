@@ -1,0 +1,201 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  width: 360px;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: #1c1c1e;
+  color: #f2f2f7;
+  font-size: 13px;
+}
+
+.popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: #2c2c2e;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-icon {
+  width: 28px;
+  height: 28px;
+  background: #007aff;
+  color: #fff;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 14px;
+}
+
+.brand-title {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.brand-sub {
+  font-size: 10px;
+  color: #8e8e93;
+}
+
+.status-pill {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 12px;
+}
+
+.status-pill.online {
+  background: rgba(52, 199, 89, 0.2);
+  color: #34c759;
+  border: 1px solid rgba(52, 199, 89, 0.4);
+}
+
+.status-pill.offline {
+  background: rgba(255, 59, 48, 0.2);
+  color: #ff3b30;
+  border: 1px solid rgba(255, 59, 48, 0.4);
+}
+
+.tab-media-section {
+  padding: 12px 14px;
+}
+
+.section-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #8e8e93;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.badge {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+}
+
+.media-list {
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.empty-state {
+  color: #8e8e93;
+  font-size: 12px;
+  text-align: center;
+  padding: 18px 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+.media-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: #2c2c2e;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.media-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+  max-width: 220px;
+}
+
+.media-url {
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #f2f2f7;
+}
+
+.media-meta {
+  font-size: 10px;
+  color: #8e8e93;
+}
+
+.download-pill-btn {
+  background: #007aff;
+  color: #fff;
+  border: none;
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.download-pill-btn:hover {
+  background: #0062cc;
+}
+
+.quick-add-section {
+  padding: 12px 14px;
+  background: #242426;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.quick-input-group {
+  display: flex;
+  gap: 8px;
+}
+
+.quick-input-group input {
+  flex: 1;
+  background: #1c1c1e;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #fff;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  outline: none;
+}
+
+.quick-input-group input:focus {
+  border-color: #007aff;
+}
+
+.quick-input-group button {
+  background: #34c759;
+  border: none;
+  color: #fff;
+  font-weight: 600;
+  padding: 0 14px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.feedback-msg {
+  font-size: 11px;
+  margin-top: 6px;
+  min-height: 14px;
+}

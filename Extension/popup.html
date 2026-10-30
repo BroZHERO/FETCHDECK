@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>MacDownloader</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-header">
+    <div class="brand">
+      <div class="brand-icon">⬇</div>
+      <div>
+        <div class="brand-title">MacDownloader</div>
+        <div class="brand-sub">IDM for Apple Silicon</div>
+      </div>
+    </div>
+    <div id="statusPill" class="status-pill offline">Checking...</div>
+  </div>
+
+  <div class="tab-media-section">
+    <div class="section-title">
+      <span>Media on this Page</span>
+      <span id="mediaCount" class="badge">0</span>
+    </div>
+    <div id="mediaList" class="media-list">
+      <div class="empty-state">No active video or audio detected yet. Play a video to capture it!</div>
+    </div>
+  </div>
+
+  <div class="quick-add-section">
+    <div class="section-title">Quick Download URL</div>
+    <div class="quick-input-group">
+      <input type="text" id="quickUrlInput" placeholder="Paste video or file link...">
+      <button id="quickSendBtn">Send</button>
+    </div>
+    <div id="feedbackMsg" class="feedback-msg"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
