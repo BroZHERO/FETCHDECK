@@ -52,170 +52,192 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   sendDownloadToApp(payload);
 });
 
-// YouTube Direct Resolver: Queries MacDownloader daemon or iOS InnerTube client
+// YouTube Direct Resolver: Queries FETCHDECK daemon or InnerTube client
 async function resolveYouTubeStreams(videoId, pageUrl = "") {
-  if (!videoId) return [];
+  let isDaemonOnline = false;
 
-  // Attempt 1: Query MacDownloader native daemon if active
+  // Attempt 1: Query FETCHDECK native daemon if active (best accuracy with yt-dlp + Node)
   try {
     const daemonRes = await fetch("http://127.0.0.1:45678/api/resolve", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ videoId: videoId, url: pageUrl })
+      body: JSON.stringify({ videoId: videoId || "", url: pageUrl || "" })
     });
     if (daemonRes.ok) {
+      isDaemonOnline = true;
       const daemonData = await daemonRes.json();
       if (daemonData && daemonData.streams && daemonData.streams.length > 0) {
-        return daemonData.streams;
+        return { streams: daemonData.streams, daemonOnline: true };
       }
     }
   } catch (e) {
-    // Daemon offline, fall through
+    // Daemon offline, fall through to browser-side fallbacks
   }
 
-  // Attempt 2: Direct InnerTube query via iOS client
-  const endpoint = "https://www.youtube.com/youtubei/v1/player";
-  const body = {
-    context: {
-      client: {
-        clientName: "IOS",
-        clientVersion: "19.29.1",
-        deviceModel: "iPhone16,2",
-        osName: "iOS",
-        osVersion: "17.5.1.21F90",
-        hl: "en",
-        gl: "US"
-      }
+  if (!videoId) return { streams: [], daemonOnline: isDaemonOnline };
+
+  // Attempt 2: Direct InnerTube query via TVHTML5 client
+  const tvClients = [
+    {
+      clientName: "TVHTML5",
+      clientVersion: "7.20240901.12.00"
     },
-    videoId: videoId
-  };
+    {
+      clientName: "ANDROID",
+      clientVersion: "19.29.35",
+      androidSdkVersion: 34
+    },
+    {
+      clientName: "IOS",
+      clientVersion: "19.29.1",
+      deviceModel: "iPhone16,2",
+      osName: "iOS",
+      osVersion: "17.5.1.21F90"
+    }
+  ];
 
-  try {
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(body)
-    });
+  for (const clientConfig of tvClients) {
+    try {
+      const endpoint = "https://www.youtube.com/youtubei/v1/player";
+      const body = {
+        context: {
+          client: {
+            ...clientConfig,
+            hl: "en",
+            gl: "US"
+          }
+        },
+        videoId: videoId
+      };
 
-    if (!res.ok) return [];
-    const data = await res.json();
-    const streamingData = data.streamingData || {};
-    const formats = streamingData.formats || [];
-    const adaptive = streamingData.adaptiveFormats || [];
-    const results = [];
-    const seenQualities = new Set();
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
 
-    let bestAudio = null;
-    for (const f of adaptive) {
-      if (f.url && f.mimeType && f.mimeType.includes("audio/")) {
-        if (!bestAudio || f.mimeType.includes("audio/mp4")) {
-          bestAudio = f;
-          if (f.mimeType.includes("audio/mp4")) break;
+      if (!res.ok) continue;
+      const data = await res.json();
+      const streamingData = data.streamingData || {};
+      const formats = streamingData.formats || [];
+      const adaptive = streamingData.adaptiveFormats || [];
+      if (formats.length === 0 && adaptive.length === 0) continue;
+
+      const results = [];
+      const seenQualities = new Set();
+
+      let bestAudio = null;
+      for (const f of adaptive) {
+        if (f.url && f.mimeType && f.mimeType.includes("audio/")) {
+          if (!bestAudio || f.mimeType.includes("audio/mp4")) {
+            bestAudio = f;
+            if (f.mimeType.includes("audio/mp4")) break;
+          }
         }
       }
-    }
 
-    const formatSize = (bytes) => {
-      if (!bytes || bytes <= 0) return "Direct Stream";
-      const mb = (bytes / (1024 * 1024)).toFixed(1);
-      return `${mb} MB`;
-    };
+      const formatSize = (bytes) => {
+        if (!bytes || bytes <= 0) return "Direct Stream";
+        const mb = (bytes / (1024 * 1024)).toFixed(1);
+        return `${mb} MB`;
+      };
 
-    // 1. Progressive muxed formats (720p itag 22, 360p itag 18)
-    for (const f of formats) {
-      if (f.url) {
-        const itag = f.itag || 0;
-        const q = f.qualityLabel || (itag === 22 ? "720p" : "360p");
-        const shortQ = q.replace(/60fps/gi, "").replace(/50fps/gi, "").trim();
-        if (seenQualities.has(shortQ)) continue;
-        seenQualities.add(shortQ);
+      // 1. Progressive muxed formats (itag 22: 720p, itag 18: 360p)
+      for (const f of formats) {
+        if (f.url) {
+          const itag = f.itag || 0;
+          const q = f.qualityLabel || (itag === 22 ? "720p" : "360p");
+          const shortQ = q.replace(/60fps/gi, "").replace(/50fps/gi, "").trim();
+          if (seenQualities.has(shortQ)) continue;
+          seenQualities.add(shortQ);
 
-        const w = f.width || (shortQ === "720p" ? 1280 : 640);
-        const h = f.height || (shortQ === "720p" ? 720 : 360);
-        const size = f.contentLength ? parseInt(f.contentLength, 10) : 0;
+          const w = f.width || (shortQ === "720p" ? 1280 : 640);
+          const h = f.height || (shortQ === "720p" ? 720 : 360);
+          const size = f.contentLength ? parseInt(f.contentLength, 10) : 0;
 
+          results.push({
+            url: f.url,
+            audioUrl: null,
+            label: `${shortQ} HD`,
+            quality: shortQ,
+            dimensions: `${w}×${h}`,
+            format: "MP4 Video",
+            type: "video",
+            combined: true,
+            size: size,
+            formattedSize: formatSize(size),
+            itag: itag
+          });
+        }
+      }
+
+      // 2. Adaptive video formats
+      for (const f of adaptive) {
+        if (f.url && f.mimeType && f.mimeType.includes("video/")) {
+          const height = f.height || 0;
+          const width = f.width || 0;
+          const fps = f.fps || 30;
+          if (height < 360) continue;
+
+          const qualityKey = `${height}p`;
+          if (seenQualities.has(qualityKey)) continue;
+          seenQualities.add(qualityKey);
+
+          const label = height >= 1080 ? `${height}p Full HD` : (height >= 720 ? `${height}p HD` : `${height}p SD`);
+          const dim = width > 0 && height > 0 ? `${width}×${height} (${fps}fps)` : `${height}p`;
+          const vSize = f.contentLength ? parseInt(f.contentLength, 10) : 0;
+          const aSize = bestAudio && bestAudio.contentLength ? parseInt(bestAudio.contentLength, 10) : 0;
+          const totalSize = vSize + aSize;
+
+          results.push({
+            url: f.url,
+            audioUrl: bestAudio ? bestAudio.url : null,
+            label: label,
+            quality: qualityKey,
+            dimensions: dim,
+            format: f.mimeType.includes("mp4") ? "MP4 Video" : "WebM Video",
+            type: "video",
+            combined: false,
+            size: totalSize,
+            formattedSize: formatSize(totalSize),
+            itag: f.itag || 0
+          });
+        }
+      }
+
+      // 3. Audio format (M4A Track)
+      if (bestAudio && bestAudio.url) {
+        const aSize = bestAudio.contentLength ? parseInt(bestAudio.contentLength, 10) : 0;
         results.push({
-          url: f.url,
+          url: bestAudio.url,
           audioUrl: null,
-          label: `${shortQ} HD`,
-          quality: shortQ,
-          dimensions: `${w}×${h}`,
-          format: "MP4 Video",
-          type: "video",
-          combined: true,
-          size: size,
-          formattedSize: formatSize(size),
-          itag: itag
-        });
-      }
-    }
-
-    // 2. High-res Adaptive video formats (1080p, 720p, 480p, 360p)
-    for (const f of adaptive) {
-      if (f.url && f.mimeType && f.mimeType.includes("video/")) {
-        const height = f.height || 0;
-        const width = f.width || 0;
-        const fps = f.fps || 30;
-        if (height < 360) continue;
-
-        const qualityKey = `${height}p`;
-        if (seenQualities.has(qualityKey)) continue;
-        seenQualities.add(qualityKey);
-
-        const label = height >= 1080 ? `${height}p Full HD` : (height >= 720 ? `${height}p HD` : `${height}p SD`);
-        const dim = width > 0 && height > 0 ? `${width}×${height} (${fps}fps)` : `${height}p`;
-        const vSize = f.contentLength ? parseInt(f.contentLength, 10) : 0;
-        const aSize = bestAudio && bestAudio.contentLength ? parseInt(bestAudio.contentLength, 10) : 0;
-        const totalSize = vSize + aSize;
-
-        results.push({
-          url: f.url,
-          audioUrl: bestAudio ? bestAudio.url : null,
-          label: label,
-          quality: qualityKey,
-          dimensions: dim,
-          format: f.mimeType.includes("mp4") ? "MP4 Video" : "WebM Video",
-          type: "video",
+          label: "Audio Track (M4A)",
+          quality: "Audio",
+          dimensions: "128 kbps Stereo",
+          format: "M4A Audio",
+          type: "audio",
           combined: false,
-          size: totalSize,
-          formattedSize: formatSize(totalSize),
-          itag: f.itag
+          size: aSize,
+          formattedSize: formatSize(aSize),
+          itag: bestAudio.itag || 140
         });
       }
-    }
 
-    // 3. Audio format (M4A Track)
-    if (bestAudio && bestAudio.url) {
-      const aSize = bestAudio.contentLength ? parseInt(bestAudio.contentLength, 10) : 0;
-      results.push({
-        url: bestAudio.url,
-        audioUrl: null,
-        label: "Audio Track (M4A)",
-        quality: "Audio",
-        dimensions: "128 kbps Stereo",
-        format: "M4A Audio",
-        type: "audio",
-        combined: false,
-        size: aSize,
-        formattedSize: formatSize(aSize),
-        itag: bestAudio.itag || 140
+      // Sort: 1080p first, then 720p, 480p, 360p, then audio
+      results.sort((a, b) => {
+        if (a.type === "video" && b.type === "audio") return -1;
+        if (a.type === "audio" && b.type === "video") return 1;
+        const getP = (str) => parseInt((str || "").replace(/[^\d]/g, ""), 10) || 0;
+        return getP(b.quality) - getP(a.quality);
       });
-    }
 
-    // Sort: 1080p first, then 720p, 480p, 360p, then audio
-    results.sort((a, b) => {
-      if (a.type === "video" && b.type === "audio") return -1;
-      if (a.type === "audio" && b.type === "video") return 1;
-      const getP = (str) => parseInt((str || "").replace(/[^\d]/g, ""), 10) || 0;
-      return getP(b.quality) - getP(a.quality);
-    });
-
-    return results;
-  } catch (err) {
-    return [];
+      if (results.length > 0) {
+        return { streams: results, daemonOnline: isDaemonOnline };
+      }
+    } catch (err) {}
   }
+
+  return { streams: [], daemonOnline: isDaemonOnline };
 }
 
 // Sniffer URL filter with IDM Master Stream Reconstruction
@@ -226,10 +248,9 @@ function parseMediaUrl(url, contentType = "", contentLength = 0) {
   if (url.includes("googlevideo.com/videoplayback")) {
     try {
       const urlObj = new URL(url);
-      const sparams = (urlObj.searchParams.get("sparams") || "").split(",");
-
-      // Skip the 31-byte init segment stub where range is in sparams
-      if (sparams.includes("range")) return null;
+      // Only skip tiny init segment stubs (e.g. range=0-31 or 0-100)
+      const range = urlObj.searchParams.get("range") || "";
+      if (range === "0-31" || range === "0-100") return null;
 
       const itagStr = urlObj.searchParams.get("itag");
       const itag = itagStr ? parseInt(itagStr, 10) : 0;
@@ -456,9 +477,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const tabId = sender.tab?.id;
     const sniffed = tabId ? tabMediaMap.get(tabId) || [] : [];
 
-    resolveYouTubeStreams(request.videoId, request.url).then((streams) => {
-      if (streams && streams.length > 0) {
-        sendResponse({ success: true, streams: streams });
+    resolveYouTubeStreams(request.videoId, request.url).then((resData) => {
+      const resStreams = (resData && resData.streams) || [];
+      const daemonOnline = (resData && resData.daemonOnline) || false;
+      if (resStreams && resStreams.length > 0) {
+        sendResponse({ success: true, streams: resStreams, daemonOnline: daemonOnline });
         return;
       }
       // Fallback: sniffed streams with strict deduplication
@@ -471,7 +494,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           deduplicated.push(s);
         }
       }
-      sendResponse({ success: true, streams: deduplicated });
+      sendResponse({ success: true, streams: deduplicated, daemonOnline: daemonOnline });
     });
     return true;
   }

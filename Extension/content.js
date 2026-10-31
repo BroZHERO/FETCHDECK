@@ -34,6 +34,9 @@
     if (shortsMatch) return shortsMatch[1];
     const embedMatch = window.location.pathname.match(/\/embed\/([a-zA-Z0-9_-]+)/);
     if (embedMatch) return embedMatch[1];
+    if (cachedVideoDetails && cachedVideoDetails.videoId) return cachedVideoDetails.videoId;
+    const meta = document.querySelector('meta[itemprop="videoId"]');
+    if (meta && meta.content) return meta.content;
     return null;
   }
 
@@ -67,7 +70,13 @@
   function isSignedUrl(url) {
     if (!url) return false;
     if (url.includes("googlevideo.com")) {
-      return url.includes("sig=") || url.includes("signature=");
+      return (
+        url.includes("sig=") ||
+        url.includes("signature=") ||
+        url.includes("lsig=") ||
+        url.includes("expire=") ||
+        url.includes("id=")
+      );
     }
     return true;
   }
@@ -264,6 +273,9 @@
 
       button.classList.add("macdl-active");
 
+      // Request fresh streaming data from yt_main.js
+      window.postMessage({ type: "MACDL_REQUEST_YT_DATA" }, "*");
+
       // Show immediate loading popover with spinner
       const loadingDropdown = document.createElement("div");
       loadingDropdown.className = "macdl-dropdown";
@@ -296,10 +308,11 @@
           },
           (res) => {
             let streams = (res && res.streams) || [];
+            const daemonOnline = (res && res.daemonOnline) || false;
             if (!streams || streams.length === 0) {
               streams = parseAllStreams(cachedStreamingData, cachedCapturedStreams, []);
             }
-            renderDropdown(streams, container, button);
+            renderDropdown(streams, container, button, daemonOnline);
           }
         );
       } else {
@@ -320,7 +333,7 @@
             });
           }
           const streams = parseAllStreams(cachedStreamingData, cachedCapturedStreams, sniffedMedia);
-          renderDropdown(streams, container, button);
+          renderDropdown(streams, container, button, true);
         });
       }
     });
@@ -338,7 +351,7 @@
     return null;
   }
 
-  function renderDropdown(mediaList, container, triggerBtn) {
+  function renderDropdown(mediaList, container, triggerBtn, daemonOnline = true) {
     const existing = container.querySelector(".macdl-dropdown");
     if (existing) existing.remove();
 
@@ -363,10 +376,19 @@
     if (mediaList.length === 0) {
       const emptyNotice = document.createElement("div");
       emptyNotice.className = "macdl-empty-notice";
-      emptyNotice.innerHTML = `
-        <strong>No media stream detected yet.</strong><br>
-        Please start the video or check that FETCHDECK is running!
-      `;
+      if (!daemonOnline) {
+        emptyNotice.innerHTML = `
+          <div class="macdl-offline-badge">● FETCHDECK App Offline</div>
+          <div class="macdl-offline-desc">FETCHDECK is required to resolve and accelerate 4K, 1080p, and multi-chunk streams:</div>
+          <a href="fetchdeck://open" class="macdl-btn-launch-app">🚀 Launch FETCHDECK App</a>
+          <div class="macdl-offline-tip">Or press Play ▶ on the video for 1 second to sniff direct streams!</div>
+        `;
+      } else {
+        emptyNotice.innerHTML = `
+          <strong>No media stream detected yet.</strong><br>
+          Please press Play ▶ on the video for 1 second, then click this button again!
+        `;
+      }
       dd.appendChild(emptyNotice);
     } else {
       const listEl = document.createElement("div");

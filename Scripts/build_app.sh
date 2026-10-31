@@ -76,6 +76,18 @@ cat << 'EOF' > "$CONTENTS/Info.plist"
     <true/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.brozhero.fetchdeck</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>fetchdeck</string>
+                <string>macdownloader</string>
+            </array>
+        </dict>
+    </array>
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsArbitraryLoads</key>

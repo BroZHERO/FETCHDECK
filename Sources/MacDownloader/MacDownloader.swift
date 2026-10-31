@@ -28,6 +28,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         LocalApiServer.shared.start()
     }
 
+    func application(_ application: NSApplication, open urls: [URL]) {
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = NSApp.windows.first {
+            window.makeKeyAndOrderFront(nil)
+        }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         LocalApiServer.shared.stop()
         Task { @MainActor in

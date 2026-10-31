@@ -1,4 +1,4 @@
-// MacDownloader YouTube Main-World Bridge Script
+// FETCHDECK YouTube Main-World Bridge Script
 // Runs directly in YouTube's main JavaScript context with direct access to player objects, network calls, and runtime
 (() => {
   let cachedDecipherer = null;
@@ -10,13 +10,21 @@
     if (!rawUrl || !rawUrl.includes("googlevideo.com/videoplayback")) return;
     try {
       const u = new URL(rawUrl);
-      const sparams = (u.searchParams.get("sparams") || "").split(",");
-      // Skip 31-byte init segment stubs
-      if (sparams.includes("range")) return;
+      const range = u.searchParams.get("range") || "";
+      // Only skip tiny init segment stubs (e.g. range=0-31 or 0-100)
+      if (range === "0-31" || range === "0-100") return;
 
       const itag = parseInt(u.searchParams.get("itag"), 10);
-      const sig = u.searchParams.get("sig") || u.searchParams.get("signature");
-      if (!itag || !sig) return;
+      if (!itag) return;
+
+      // Ensure URL has authentication/playback validity (sig, lsig, s, expire, or id)
+      const hasAuth =
+        u.searchParams.has("sig") ||
+        u.searchParams.has("signature") ||
+        u.searchParams.has("lsig") ||
+        u.searchParams.has("expire") ||
+        u.searchParams.has("id");
+      if (!hasAuth) return;
 
       // Clean playback slice parameters (rn, sq, rbuf, range) to construct Master Stream URL
       const clean = new URL(rawUrl);
@@ -36,6 +44,33 @@
       });
 
       broadcastStreams();
+    } catch (e) {}
+  }
+
+  function scanPerformanceResources() {
+    try {
+      if (typeof performance !== "undefined" && typeof performance.getEntriesByType === "function") {
+        const entries = performance.getEntriesByType("resource");
+        for (const entry of entries) {
+          if (entry.name && entry.name.includes("googlevideo.com/videoplayback")) {
+            processCapturedUrl(entry.name);
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
+  function scanMediaElements() {
+    try {
+      const videos = document.querySelectorAll("video");
+      for (const v of videos) {
+        if (v.src && v.src.includes("googlevideo.com")) {
+          processCapturedUrl(v.src);
+        }
+        if (v.currentSrc && v.currentSrc.includes("googlevideo.com")) {
+          processCapturedUrl(v.currentSrc);
+        }
+      }
     } catch (e) {}
   }
 
@@ -126,10 +161,25 @@
       }
     } catch (e) {}
 
+    try {
+      if (window.ytplayer && window.ytplayer.config && window.ytplayer.config.args) {
+        const pr = window.ytplayer.config.args.raw_player_response || window.ytplayer.config.args.player_response;
+        if (typeof pr === "string") {
+          const parsed = JSON.parse(pr);
+          if (parsed && parsed.streamingData) return parsed;
+        } else if (pr && pr.streamingData) {
+          return pr;
+        }
+      }
+    } catch (e) {}
+
     return null;
   }
 
   async function broadcastStreams() {
+    scanPerformanceResources();
+    scanMediaElements();
+
     const data = getRawPlayerData();
     const streamingData = data ? JSON.parse(JSON.stringify(data.streamingData || {})) : {};
     const decipher = await getDecipherer();
@@ -144,7 +194,7 @@
       }
 
       // Check if format already has a valid signed URL
-      if (f.url && (f.url.includes("sig=") || f.url.includes("signature="))) {
+      if (f.url && (f.url.includes("sig=") || f.url.includes("signature=") || f.url.includes("lsig=") || f.url.includes("expire="))) {
         return f;
       }
 
@@ -191,16 +241,22 @@
   // Periodic and event-driven updates
   window.addEventListener("yt-navigate-finish", () => {
     interceptedUrls.clear();
-    setTimeout(broadcastStreams, 400);
-    setTimeout(broadcastStreams, 1500);
+    scanPerformanceResources();
+    scanMediaElements();
+    setTimeout(broadcastStreams, 300);
+    setTimeout(broadcastStreams, 1200);
   });
 
   window.addEventListener("message", (event) => {
     if (event.data && event.data.type === "MACDL_REQUEST_YT_DATA") {
+      scanPerformanceResources();
+      scanMediaElements();
       broadcastStreams();
     }
   });
 
+  scanPerformanceResources();
+  scanMediaElements();
   setInterval(broadcastStreams, 2000);
-  setTimeout(broadcastStreams, 600);
+  setTimeout(broadcastStreams, 500);
 })();
