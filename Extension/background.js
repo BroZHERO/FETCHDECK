@@ -391,6 +391,10 @@ function registerMedia(tabId, mediaItem) {
     list.push(mediaItem);
   }
 
+  if (list.length > 50) {
+    list.pop();
+  }
+
   // Automatic audio pairing for adaptive YouTube streams
   const bestAudio = list.find((item) => item.type === "audio");
   if (bestAudio) {
