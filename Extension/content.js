@@ -296,46 +296,27 @@
       });
       container.appendChild(loadingDropdown);
 
-      const isYouTube = window.location.hostname.includes("youtube.com");
-
-      if (isYouTube) {
-        // Query background daemon resolver with full yt-dlp challenge solver
-        chrome.runtime.sendMessage(
-          {
-            action: "resolve_youtube_formats",
-            url: window.location.href,
-            videoId: getVideoId()
-          },
-          (res) => {
-            let streams = (res && res.streams) || [];
-            const daemonOnline = (res && res.daemonOnline) || false;
-            if (!streams || streams.length === 0) {
-              streams = parseAllStreams(cachedStreamingData, cachedCapturedStreams, []);
-            }
-            renderDropdown(streams, container, button, daemonOnline);
-          }
-        );
-      } else {
-        // Non-YouTube video site: query background sniffer
-        chrome.runtime.sendMessage({ action: "get_tab_media" }, (tabRes) => {
-          const sniffedMedia = (tabRes && tabRes.media) || [];
-          const directSource = getDirectSource(mediaElement);
-          if (directSource && !sniffedMedia.some((m) => m.url === directSource)) {
-            sniffedMedia.unshift({
-              url: directSource,
-              label: "Direct Video Stream",
-              quality: "Source",
-              dimensions: "Original",
-              format: "Direct Media",
-              size: 0,
-              type: mediaElement.tagName.toLowerCase() === "video" ? "video" : "audio",
-              combined: true
-            });
-          }
-          const streams = parseAllStreams(cachedStreamingData, cachedCapturedStreams, sniffedMedia);
-          renderDropdown(streams, container, button, true);
-        });
+      if (window.location.hostname.includes("youtube.com")) {
+        window.postMessage({ type: "MACDL_REQUEST_YT_DATA" }, "*");
       }
+
+      // Query universal resolver in background (supports YouTube, TikTok, Instagram, Twitter, Vimeo, and any video site)
+      chrome.runtime.sendMessage(
+        {
+          action: "resolve_universal_media",
+          url: window.location.href,
+          videoId: getVideoId(),
+          directSource: getDirectSource(mediaElement)
+        },
+        (res) => {
+          let streams = (res && res.streams) || [];
+          const daemonOnline = (res && res.daemonOnline) || false;
+          if (!streams || streams.length === 0) {
+            streams = parseAllStreams(cachedStreamingData, cachedCapturedStreams, (res && res.sniffed) || []);
+          }
+          renderDropdown(streams, container, button, daemonOnline);
+        }
+      );
     });
 
     container.appendChild(button);

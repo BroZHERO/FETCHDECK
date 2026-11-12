@@ -101,16 +101,30 @@ To recompile or package from source:
 ./Scripts/build_app.sh
 ```
 
-### 2. Installing the Chrome Companion Extension
-1. Open Google Chrome and visit: `chrome://extensions`
+### 2. Installing the Chrome / Chromium Extension
+1. Open Google Chrome (or Brave / Edge) and visit: `chrome://extensions`
 2. Toggle on **Developer mode** in the top-right corner.
 3. Click **Load unpacked** in the top-left corner.
 4. Select the `Extension` folder:
    ```
    MacDownloader/Extension
    ```
-5. Navigate to any video site (e.g. YouTube, Vimeo, TikTok).
-6. Click the hovering **FetchDeck** button to choose your resolution, or use the extension toolbar popup to trigger instant multi-chunk acceleration.
+5. Navigate to any video site (e.g. YouTube, Vimeo, TikTok, Instagram, Twitter/X, Reddit).
+6. Click the hovering **FetchDeck** button to choose your resolution, or use the extension toolbar popup.
+
+### 3. Installing the Opera Companion Extension
+1. Open **Opera Browser** on your Mac.
+2. In the Opera address bar, navigate to:
+   ```
+   opera://extensions
+   ```
+3. In the top-right corner, turn ON the **Developer mode** toggle.
+4. Click the **Load unpacked** button in the top-left.
+5. In the file picker, select the `Extension-Opera` folder (or `Extension`):
+   ```
+   MacDownloader/Extension-Opera
+   ```
+6. The **FetchDeck** icon will appear in your Opera toolbar and the hovering download pill will automatically appear over videos on **any website**!
 
 ---
 
@@ -118,4 +132,4 @@ To recompile or package from source:
 
 Released under the MIT License. Crafted with precision for macOS Sequoia.
 
-**FETCHDECK** — Vibecoded by Abishek [@brozhero](https://github.com/brozhero).
+**FETCHDECK** — Vibecoded by Abishek [@BroZHERO](https://github.com/BroZHERO).

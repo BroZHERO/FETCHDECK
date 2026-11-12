@@ -240,6 +240,77 @@ async function resolveYouTubeStreams(videoId, pageUrl = "") {
   return { streams: [], daemonOnline: isDaemonOnline };
 }
 
+// Universal Media Resolver: Queries FETCHDECK daemon (supports 1,000+ sites) + in-browser sniffer
+async function resolveUniversalMedia(url, videoId, tabId, directSource) {
+  let isDaemonOnline = false;
+  let daemonStreams = [];
+
+  // 1. Query FETCHDECK native daemon
+  try {
+    const daemonRes = await fetch("http://127.0.0.1:45678/api/resolve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: url || "", videoId: videoId || "" })
+    });
+    if (daemonRes.ok) {
+      isDaemonOnline = true;
+      const daemonData = await daemonRes.json();
+      if (daemonData && daemonData.streams && daemonData.streams.length > 0) {
+        daemonStreams = daemonData.streams;
+      }
+    }
+  } catch (e) {
+    // Daemon offline
+  }
+
+  // 2. YouTube InnerTube fallback if daemon offline
+  if (daemonStreams.length === 0 && url && (url.includes("youtube.com") || url.includes("youtu.be"))) {
+    const ytRes = await resolveYouTubeStreams(videoId, url);
+    if (ytRes && ytRes.streams && ytRes.streams.length > 0) {
+      daemonStreams = ytRes.streams;
+    }
+  }
+
+  // 3. Tab sniffed media
+  const sniffed = tabId ? tabMediaMap.get(tabId) || [] : [];
+  const results = [...daemonStreams];
+  const seenUrls = new Set(results.map((r) => r.url));
+
+  // 4. Direct video element source (from <video src="...">)
+  if (directSource && !seenUrls.has(directSource)) {
+    const extMatch = directSource.split("?")[0].split(".").pop().toUpperCase();
+    const isDirectAudio = directSource.match(/\.(mp3|m4a|aac|wav|ogg|flac)(\?|$)/i);
+    const mediaItem = {
+      url: directSource,
+      audioUrl: null,
+      label: isDirectAudio ? "Direct Audio Track" : `Direct Video (${extMatch.length <= 4 ? extMatch : "MP4"})`,
+      quality: isDirectAudio ? "Audio" : "Source HD",
+      dimensions: isDirectAudio ? "Stereo" : "Direct Stream",
+      format: isDirectAudio ? "Audio Track" : "Direct Media",
+      type: isDirectAudio ? "audio" : "video",
+      combined: true,
+      size: 0,
+      formattedSize: "Direct Stream"
+    };
+    results.unshift(mediaItem);
+    seenUrls.add(directSource);
+  }
+
+  // 5. Append sniffed streams (.m3u8, .mpd, .mp4, direct streams)
+  for (const item of sniffed) {
+    if (!seenUrls.has(item.url)) {
+      results.push(item);
+      seenUrls.add(item.url);
+    }
+  }
+
+  return {
+    streams: results,
+    daemonOnline: isDaemonOnline,
+    sniffed: sniffed
+  };
+}
+
 // Sniffer URL filter with IDM Master Stream Reconstruction
 function parseMediaUrl(url, contentType = "", contentLength = 0) {
   if (!url || url.startsWith("blob:") || url.startsWith("data:")) return null;
@@ -418,10 +489,14 @@ chrome.webRequest.onBeforeRequest.addListener(
     if (
       url.includes(".m3u8") ||
       url.includes(".mpd") ||
-      url.match(/\.(mp4|webm|m4s|m4a|mp3|ts)(\?|$)/i) ||
-      url.includes("googlevideo.com/videoplayback") ||
+      url.match(/\.(mp4|webm|m4s|m4a|mp3|ts|mov|mkv|flv|m4v)(\?|$)/i) ||
+      url.includes("googlevideo.com") ||
       url.includes("mime=video") ||
-      url.includes("mime=audio")
+      url.includes("mime=audio") ||
+      url.includes("vimeocdn.com") ||
+      url.includes("tiktokcdn.com") ||
+      url.includes("fbcdn.net") ||
+      url.includes("twimg.com")
     ) {
       const parsed = parseMediaUrl(url);
       if (parsed) {
@@ -477,6 +552,19 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
 // Message Dispatcher
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === "resolve_universal_media" || request.action === "resolve_media") {
+    const tabId = sender.tab?.id || request.tabId;
+    resolveUniversalMedia(request.url, request.videoId, tabId, request.directSource).then((resData) => {
+      sendResponse({
+        success: true,
+        streams: resData.streams,
+        daemonOnline: resData.daemonOnline,
+        sniffed: resData.sniffed
+      });
+    });
+    return true;
+  }
+
   if (request.action === "resolve_youtube_formats" || request.action === "resolve_youtube_streams") {
     const tabId = sender.tab?.id;
     const sniffed = tabId ? tabMediaMap.get(tabId) || [] : [];

@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>FETCHDECK</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-header">
+    <div class="brand">
+      <img src="icons/icon48.png" class="brand-img" alt="FetchDeck" width="28" height="28">
+      <div>
+        <div class="brand-title">FETCHDECK</div>
+        <div class="brand-sub">[Your downloads, all in one place.]</div>
+      </div>
+    </div>
+    <div id="statusPill" class="status-pill offline">Checking...</div>
+  </div>
+
+  <div class="tab-media-section">
+    <div class="section-title">
+      <span>Streams on Page (1,000+ Sites)</span>
+      <span id="mediaCount" class="badge">0</span>
+    </div>
+    <div id="mediaList" class="media-list">
+      <div class="empty-state">No active media stream detected yet. Play a video to sniff available qualities!</div>
+    </div>
+  </div>
+
+  <div class="quick-add-section">
+    <div class="section-title">Universal URL Accelerator</div>
+    <div class="quick-input-group">
+      <input type="text" id="quickUrlInput" placeholder="Paste YouTube, TikTok, Vimeo, or direct link...">
+      <button id="quickSendBtn">Send</button>
+    </div>
+    <div id="feedbackMsg" class="feedback-msg"></div>
+  </div>
+
+  <div class="popup-footer">
+    <span>Vibecoded by Abishek @brozhero</span>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

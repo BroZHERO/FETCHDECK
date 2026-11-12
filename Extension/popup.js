@@ -27,17 +27,13 @@ document.addEventListener("DOMContentLoaded", async () => {
       } catch (e) {}
     }
 
-    if (videoId) {
-      chrome.runtime.sendMessage({ action: "resolve_youtube_formats", videoId, url: tab.url }, (res) => {
-        if (res && res.streams && res.streams.length > 0) {
-          renderPopupMedia(res.streams, tab);
-        } else {
-          fallbackGetTabMedia(tab);
-        }
-      });
-    } else {
-      fallbackGetTabMedia(tab);
-    }
+    chrome.runtime.sendMessage({ action: "resolve_universal_media", videoId, url: tab.url, tabId: tab.id }, (res) => {
+      if (res && res.streams && res.streams.length > 0) {
+        renderPopupMedia(res.streams, tab);
+      } else {
+        fallbackGetTabMedia(tab);
+      }
+    });
   }
 
   function fallbackGetTabMedia(tab) {
