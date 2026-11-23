@@ -346,7 +346,7 @@ function isIgnoredMediaUrl(url) {
 
   // 2. Suno AI specific filters
   if (lower.includes("suno.com") || lower.includes("suno.ai")) {
-    if (lower.includes("studio-api.") || lower.includes("/api/")) {
+    if (lower.includes("studio-api.") && !lower.match(/\.(mp3|mp4|wav|m4a|aac)(\?|$)/i)) {
       return true;
     }
     const isSunoCdn = lower.includes("cdn1.suno.ai") || lower.includes("cdn2.suno.ai") || lower.includes("audiopipe.suno.ai");
@@ -574,6 +574,14 @@ function registerMedia(tabId, mediaItem) {
 
   chrome.action.setBadgeText({ tabId, text: String(list.length) });
   chrome.action.setBadgeBackgroundColor({ tabId, color: "#007aff" });
+
+  // Real-time broadcast to active tab so content.js can render floating badge / audio pill
+  if (tabId > 0 && (mediaItem.type === "audio" || mediaItem.combined)) {
+    chrome.tabs.sendMessage(tabId, {
+      action: "macdl_media_detected",
+      media: mediaItem
+    }).catch(() => {});
+  }
 }
 
 // Sniff 1: onBeforeRequest

@@ -25,6 +25,12 @@
       "run_at": "document_start"
     },
     {
+      "matches": ["*://*.suno.com/*", "*://*.suno.ai/*"],
+      "js": ["suno_main.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
       "matches": ["<all_urls>"],
       "js": ["content.js"],
       "css": ["overlay.css"],
