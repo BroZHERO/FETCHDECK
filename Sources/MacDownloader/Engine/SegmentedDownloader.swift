@@ -10,6 +10,7 @@ public actor SegmentedDownloader {
     private let cookie: String?
     private let quality: String?
     private let audioUrl: URL?
+    private let authorization: String?
 
     private var isCancelled = false
     private var isPaused = false
@@ -44,6 +45,7 @@ public actor SegmentedDownloader {
         self.cookie = item.cookie
         self.quality = item.quality
         self.audioUrl = item.audioUrl
+        self.authorization = item.authorization
         self.segments = item.segments
         self.totalBytes = item.fileSize
         self.onProgress = onProgress
@@ -393,6 +395,7 @@ public actor SegmentedDownloader {
         if let referer = referer { headRequest.setValue(referer, forHTTPHeaderField: "Referer") }
         if let userAgent = userAgent { headRequest.setValue(userAgent, forHTTPHeaderField: "User-Agent") }
         if let cookie = cookie { headRequest.setValue(cookie, forHTTPHeaderField: "Cookie") }
+        if let authorization = authorization { headRequest.setValue(authorization, forHTTPHeaderField: "Authorization") }
         if isSuno {
             headRequest.setValue("https://suno.com", forHTTPHeaderField: "Origin")
             if headRequest.value(forHTTPHeaderField: "Referer") == nil {
@@ -418,6 +421,7 @@ public actor SegmentedDownloader {
         if let referer = referer { rangeRequest.setValue(referer, forHTTPHeaderField: "Referer") }
         if let userAgent = userAgent { rangeRequest.setValue(userAgent, forHTTPHeaderField: "User-Agent") }
         if let cookie = cookie { rangeRequest.setValue(cookie, forHTTPHeaderField: "Cookie") }
+        if let authorization = authorization { rangeRequest.setValue(authorization, forHTTPHeaderField: "Authorization") }
         if isSuno {
             rangeRequest.setValue("https://suno.com", forHTTPHeaderField: "Origin")
             if rangeRequest.value(forHTTPHeaderField: "Referer") == nil {
@@ -487,6 +491,7 @@ public actor SegmentedDownloader {
         if let referer = referer { request.setValue(referer, forHTTPHeaderField: "Referer") }
         if let userAgent = userAgent { request.setValue(userAgent, forHTTPHeaderField: "User-Agent") }
         if let cookie = cookie { request.setValue(cookie, forHTTPHeaderField: "Cookie") }
+        if let authorization = authorization { request.setValue(authorization, forHTTPHeaderField: "Authorization") }
 
         let isSuno = targetURL.host?.contains("suno.ai") == true || targetURL.host?.contains("suno.com") == true
         if isSuno {

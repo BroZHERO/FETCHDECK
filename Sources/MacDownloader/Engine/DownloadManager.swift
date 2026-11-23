@@ -238,6 +238,7 @@ public class DownloadManager: ObservableObject {
         resolutionDetails: String? = nil,
         thumbnailURL: URL? = nil,
         duration: String? = nil,
+        authorization: String? = nil,
         category: DownloadCategory = .other,
         autoStart: Bool = true
     ) -> DownloadItem {
@@ -268,7 +269,8 @@ public class DownloadManager: ObservableObject {
             audioUrl: audioUrl,
             resolutionDetails: resolutionDetails,
             thumbnailURL: finalThumb,
-            duration: duration
+            duration: duration,
+            authorization: authorization
         )
 
         items.insert(item, at: 0)

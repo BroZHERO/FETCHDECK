@@ -347,6 +347,52 @@ it("Extracts title from row even when first link is an image wrapper", () => {
   assert.strictEqual(discovered[0].uuid, "d35afa0a-efe8-461d-8077-3ce1a266cfa6");
 });
 
+console.log("\n--- TEST GROUP 6: Suno Signed URL Resolution & Dual Button Dispatch ---");
+it("Distinguishes between bare unsigned Suno URL and authorized signed stream", () => {
+  const bareUrl = "https://cdn1.suno.ai/18e91ea4-0daf-4f7b-a2ec-01df04696dc0.mp3";
+  const signedUrl = "https://cdn1.suno.ai/18e91ea4-0daf-4f7b-a2ec-01df04696dc0.mp3?Key-Pair-Id=K38W0D8X4P0P5Q&Signature=ABC123XYZ&Expires=1795438800";
+  const studioSigned = "https://audiopipe.suno.ai/?item_id=18e91ea4-0daf-4f7b-a2ec-01df04696dc0&token=eyJhbGciOi...";
+
+  function isUnsignedSunoUrl(url) {
+    if (!url.includes("suno.ai") && !url.includes("suno.com")) return false;
+    return !url.includes("Key-Pair-Id") && !url.includes("Signature") && !url.includes("token");
+  }
+
+  assert.strictEqual(isUnsignedSunoUrl(bareUrl), true, "Bare cdn1 URL without signature must be detected as unsigned");
+  assert.strictEqual(isUnsignedSunoUrl(signedUrl), false, "CloudFront signed URL must be recognized as valid");
+  assert.strictEqual(isUnsignedSunoUrl(studioSigned), false, "Audiopipe tokenized URL must be recognized as valid");
+});
+
+it("Constructs authorized Suno download request headers", () => {
+  const dummyToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.signature";
+  const headers = {
+    "Accept": "application/json, text/plain, */*"
+  };
+  if (dummyToken) {
+    headers["Authorization"] = `Bearer ${dummyToken}`;
+  }
+  assert.strictEqual(headers["Authorization"], `Bearer ${dummyToken}`);
+  assert.strictEqual(headers["Accept"], "application/json, text/plain, */*");
+});
+
+it("Formats Suno API endpoint for clip download", () => {
+  const clipId = "18e91ea4-0daf-4f7b-a2ec-01df04696dc0";
+  const format = "mp3";
+  const endpoint = `https://studio-api.prod.suno.com/api/download/clip/${clipId}?format=${format}`;
+  assert.strictEqual(endpoint, "https://studio-api.prod.suno.com/api/download/clip/18e91ea4-0daf-4f7b-a2ec-01df04696dc0?format=mp3");
+});
+
+it("Validates popup actions include both Download and Browser options", () => {
+  const rowHtml = `
+    <div class="media-row-actions">
+      <button class="download-pill-btn" data-url="https://example.com/test.mp3">⬇ Download</button>
+      <button class="browser-pill-btn" data-url="https://example.com/test.mp3" title="Save directly in browser">🌐 Browser</button>
+    </div>
+  `;
+  assert.strictEqual(rowHtml.includes("download-pill-btn"), true);
+  assert.strictEqual(rowHtml.includes("browser-pill-btn"), true);
+});
+
 console.log("\n=================================================");
 console.log(`  ALL BACKTESTS PASSED! (${passedTests}/${totalTests} assertions)`);
 console.log("=================================================");

@@ -87,11 +87,13 @@ document.addEventListener("DOMContentLoaded", async () => {
             <div class="media-url" title="${item.url}">${icon} ${escapeHtml(title)}</div>
             <div class="media-meta">${qualityStr}${descType}${dimStr}${formattedSize}</div>
           </div>
-          <button class="download-pill-btn" data-url="${item.url}">⬇ Download</button>
+          <div class="media-row-actions">
+            <button class="download-pill-btn" data-url="${item.url}">⬇ Download</button>
+            <button class="browser-pill-btn" data-url="${item.url}" title="Save directly in browser">🌐 Browser</button>
+          </div>
         `;
 
-        const btn = row.querySelector(".download-pill-btn");
-        btn.addEventListener("click", () => {
+        function getSafeFilename() {
           let baseTitle = item.title;
           if (!isValidTitle(baseTitle)) {
             baseTitle = (tab?.title || "").replace(/ - YouTube$/, "").replace(/\s*\|\s*Suno.*$/i, "").replace(/[\\/:*?"<>|]/g, "_").trim();
@@ -116,12 +118,42 @@ document.addEventListener("DOMContentLoaded", async () => {
               ext = "m4a";
             }
           }
-          const safeName = isSuno
+          return isSuno
             ? `${baseTitle || "Suno_Track"} - Suno AI.${ext}`
             : `[${item.quality || (isAudio ? "Audio" : index + 1)}] ${baseTitle}.${ext}`;
+        }
+
+        async function resolveSunoIfNeed(targetBtn) {
+          if (!isSuno) return { url: item.url, authToken: item.authToken || null };
+          const match = item.url.match(/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/);
+          const isUnsigned = !item.url.includes("Key-Pair-Id") && !item.url.includes("Signature") && !item.url.includes("token");
+
+          if (match && isUnsigned) {
+            if (targetBtn) targetBtn.innerText = "Resolving...";
+            try {
+              const res = await new Promise((resolve) => {
+                chrome.tabs.sendMessage(tab.id, { action: "resolve_suno_url", clipId: match[1] }, (resp) => {
+                  if (chrome.runtime.lastError) {}
+                  resolve(resp);
+                });
+              });
+              if (res && res.downloadUrl) {
+                item.url = res.downloadUrl;
+                item.authToken = res.authToken || null;
+                return { url: res.downloadUrl, authToken: res.authToken || null };
+              }
+            } catch (e) {}
+          }
+          return { url: item.url, authToken: item.authToken || null };
+        }
+
+        const btn = row.querySelector(".download-pill-btn");
+        btn.addEventListener("click", async () => {
+          const { url: finalUrl, authToken } = await resolveSunoIfNeed(btn);
+          const safeName = getSafeFilename();
 
           dispatchDownload(
-            item.url,
+            finalUrl,
             safeName,
             item.quality || (isAudio ? "320 kbps MP3" : "HD"),
             tab.url,
@@ -130,8 +162,33 @@ document.addEventListener("DOMContentLoaded", async () => {
             item.audioUrl,
             item.dimensions,
             isAudio || isSuno ? "audio" : "video",
-            item.thumbnail
+            item.thumbnail,
+            authToken
           );
+        });
+
+        const browserBtn = row.querySelector(".browser-pill-btn");
+        browserBtn.addEventListener("click", async () => {
+          const { url: finalUrl } = await resolveSunoIfNeed(browserBtn);
+          const safeName = getSafeFilename();
+
+          browserBtn.innerText = "Downloading...";
+          chrome.runtime.sendMessage({
+            action: "download_in_browser",
+            payload: {
+              url: finalUrl,
+              filename: safeName
+            }
+          }, (res) => {
+            if (chrome.runtime.lastError) {}
+            if (res && res.success) {
+              browserBtn.innerText = "✓ Saved";
+              setTimeout(() => { browserBtn.innerText = "🌐 Browser"; }, 2500);
+            } else {
+              browserBtn.innerText = "Failed";
+              setTimeout(() => { browserBtn.innerText = "🌐 Browser"; }, 2500);
+            }
+          });
         });
 
         mediaList.appendChild(row);
@@ -147,7 +204,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     dispatchDownload(url, null, isAudioUrl ? "Audio" : "Direct", tab?.url, quickSendBtn, feedbackMsg, null, null, isAudioUrl ? "audio" : "video");
   });
 
-  function dispatchDownload(url, filename, quality, referer, btnElement, feedbackTarget, audioUrl = null, dimensions = null, category = null, thumbnail = null) {
+  function dispatchDownload(url, filename, quality, referer, btnElement, feedbackTarget, audioUrl = null, dimensions = null, category = null, thumbnail = null, authToken = null) {
     if (!url || url.startsWith("blob:") || url.startsWith("data:")) {
       if (feedbackTarget) {
         feedbackTarget.style.color = "#ff3b30";
@@ -167,7 +224,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       category: isAudio ? "audio" : (category || "video"),
       thumbnail: thumbnail || null,
       referer: referer || "",
-      userAgent: navigator.userAgent
+      userAgent: navigator.userAgent,
+      authorization: authToken ? `Bearer ${authToken}` : null
     };
 
     chrome.runtime.sendMessage({ action: "send_to_app", payload }, (res) => {

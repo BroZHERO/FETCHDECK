@@ -28,6 +28,32 @@
   };
 
   const sunoTrackMap = new Map();
+  let nextRequestId = 1;
+  const pendingRequests = new Map();
+
+  function requestSunoSignedUrl(clipId, format = "mp3") {
+    return new Promise((resolve) => {
+      const reqId = "req_" + (nextRequestId++);
+      const timer = setTimeout(() => {
+        if (pendingRequests.has(reqId)) {
+          pendingRequests.delete(reqId);
+          resolve({ downloadUrl: null, authToken: null });
+        }
+      }, 6000);
+
+      pendingRequests.set(reqId, (result) => {
+        clearTimeout(timer);
+        resolve(result);
+      });
+
+      window.postMessage({
+        type: "FETCHDECK_RESOLVE_SUNO_URL",
+        requestId: reqId,
+        clipId: clipId,
+        format: format
+      }, "*");
+    });
+  }
 
   // Listen for YouTube and Suno player data dispatched from main-world hooks
   window.addEventListener("message", (event) => {
@@ -35,6 +61,36 @@
       cachedStreamingData = event.data.streamingData;
       cachedCapturedStreams = event.data.capturedStreams || [];
       cachedVideoDetails = event.data.videoDetails;
+    }
+
+    if (event.data && event.data.type === "FETCHDECK_SUNO_URL_RESOLVED") {
+      const { requestId, downloadUrl, authToken } = event.data;
+      if (pendingRequests.has(requestId)) {
+        const resolve = pendingRequests.get(requestId);
+        pendingRequests.delete(requestId);
+        resolve({ downloadUrl, authToken });
+      }
+    }
+
+    if (event.data && event.data.type === "FETCHDECK_SUNO_DOWNLOAD_URL_READY") {
+      const clipId = event.data.clipId;
+      const downloadUrl = event.data.downloadUrl;
+      if (clipId && downloadUrl) {
+        if (sunoTrackMap.has(clipId)) {
+          const t = sunoTrackMap.get(clipId);
+          t.audioUrl = downloadUrl;
+          t.url = downloadUrl;
+        }
+        safeSendMessage({
+          action: "register_suno_metadata",
+          metadata: {
+            uuid: clipId,
+            downloadUrl: downloadUrl,
+            audioUrl: downloadUrl,
+            authToken: event.data.authToken || null
+          }
+        });
+      }
     }
 
     if (event.data && event.data.type === "FETCHDECK_SUNO_TRACKS") {
@@ -46,22 +102,24 @@
         if (t.title) sunoTrackMap.set(t.title.trim().toLowerCase(), t);
         if (t.audioUrl) sunoTrackMap.set(t.audioUrl, t);
 
-        discovered.push({
-          url: t.audioUrl,
-          audioUrl: null,
-          label: `Suno AI: ${t.title}`,
-          title: t.title,
-          artist: t.artist || "Suno AI",
-          thumbnail: t.imageUrl || null,
-          quality: "320 kbps MP3",
-          dimensions: "Suno Master",
-          format: "MP3 Audio",
-          type: "audio",
-          category: "audio",
-          combined: true,
-          size: 0,
-          formattedSize: "320 kbps MP3"
-        });
+        if (t.audioUrl && !t.audioUrl.includes("forbidden")) {
+          discovered.push({
+            url: t.audioUrl,
+            audioUrl: null,
+            label: `Suno AI: ${t.title}`,
+            title: t.title,
+            artist: t.artist || "Suno AI",
+            thumbnail: t.imageUrl || null,
+            quality: "320 kbps MP3",
+            dimensions: "Suno Master",
+            format: "MP3 Audio",
+            type: "audio",
+            category: "audio",
+            combined: true,
+            size: 0,
+            formattedSize: "320 kbps MP3"
+          });
+        }
       }
 
       if (discovered.length > 0) {
@@ -80,8 +138,17 @@
     }
   });
 
-  // Listen for media broadcasts from background.js
-  chrome.runtime.onMessage.addListener((request) => {
+  // Listen for media broadcasts and commands from background.js / popup.js
+  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === "resolve_suno_url" && request.clipId) {
+      requestSunoSignedUrl(request.clipId, request.format || "mp3").then((res) => {
+        sendResponse(res || { downloadUrl: null, authToken: null });
+      }).catch(() => {
+        sendResponse({ downloadUrl: null, authToken: null });
+      });
+      return true;
+    }
+
     if (request.action === "macdl_media_detected" && request.media) {
       if (window.location.hostname.includes("suno.com") || window.location.hostname.includes("suno.ai")) {
         const pInfo = getSunoActivePlayerInfo();
@@ -970,14 +1037,15 @@
     container.appendChild(dd);
   }
 
-  function dispatchDownload(item, button, inBrowser = false) {
+  async function dispatchDownload(item, button, inBrowser = false) {
     if (!item.url || item.url.startsWith("blob:") || item.url.startsWith("data:")) {
       showTemporaryFeedback(button, "Cannot download blob stream", "macdl-error");
       return;
     }
 
     const isAudio = item.type === "audio" || (item.format && item.format.toLowerCase().includes("audio"));
-    const isSuno = item.url.includes(".suno.ai") || item.url.includes(".suno.com") || item.url.includes("audiopipe");
+    const isSuno = item.url.includes(".suno.ai") || item.url.includes(".suno.com") || item.url.includes("audiopipe") ||
+                   (item.label && item.label.toLowerCase().includes("suno"));
 
     let rawTitle = item.title;
     if (!isValidTitle(rawTitle)) {
@@ -1017,6 +1085,24 @@
       ? `${rawTitle || "Suno_AI_Song"} - Suno AI.${ext}`
       : `${item.quality ? `[${item.quality}] ` : ""}${rawTitle}.${ext}`;
 
+    // For Suno tracks: if the URL is unsigned (bare cdn1 or placeholder), resolve official signed link first
+    if (isSuno) {
+      const uuidMatch = item.url.match(/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/);
+      const isUnsigned = !item.url.includes("Key-Pair-Id") && !item.url.includes("Signature") && !item.url.includes("token");
+
+      if (uuidMatch && isUnsigned) {
+        showTemporaryFeedback(button, "Resolving stream...", "macdl-active");
+        try {
+          const res = await requestSunoSignedUrl(uuidMatch[1], "mp3");
+          if (res && res.downloadUrl) {
+            item.url = res.downloadUrl;
+            item.audioUrl = null;
+            if (res.authToken) item.authToken = res.authToken;
+          }
+        } catch (e) {}
+      }
+    }
+
     const payload = {
       url: item.url,
       pageUrl: window.location.href,
@@ -1028,7 +1114,8 @@
       category: isAudio || isSuno ? "audio" : "video",
       thumbnail: item.thumbnail || null,
       referer: window.location.href,
-      userAgent: navigator.userAgent
+      userAgent: navigator.userAgent,
+      authorization: item.authToken ? `Bearer ${item.authToken}` : null
     };
 
     if (inBrowser) {
@@ -1116,7 +1203,11 @@
 
       seenUuids.add(uuid);
 
-      const mp3Url = `https://cdn1.suno.ai/${uuid}.mp3`;
+      let mp3Url = `https://cdn1.suno.ai/${uuid}.mp3`;
+      if (sunoTrackMap.has(uuid) && sunoTrackMap.get(uuid).audioUrl && !sunoTrackMap.get(uuid).audioUrl.includes("forbidden")) {
+        mp3Url = sunoTrackMap.get(uuid).audioUrl;
+      }
+
       let imageUrl = null;
       let artist = "Suno AI";
 
@@ -1149,6 +1240,26 @@
       sunoTrackMap.set(mp3Url, item);
 
       discovered.push(item);
+
+      // Pre-resolve signed URL in background
+      if (!mp3Url.includes("Key-Pair-Id") && !mp3Url.includes("Signature") && !mp3Url.includes("token")) {
+        requestSunoSignedUrl(uuid, "mp3").then((res) => {
+          if (res && res.downloadUrl) {
+            item.url = res.downloadUrl;
+            if (res.authToken) item.authToken = res.authToken;
+            sunoTrackMap.set(uuid, item);
+            safeSendMessage({
+              action: "register_suno_metadata",
+              metadata: {
+                uuid: uuid,
+                downloadUrl: res.downloadUrl,
+                audioUrl: res.downloadUrl,
+                authToken: res.authToken || null
+              }
+            });
+          }
+        }).catch(() => {});
+      }
     });
 
     if (discovered.length > 0) {

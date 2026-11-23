@@ -57,6 +57,7 @@ public struct DownloadItem: Identifiable, Codable, Sendable {
     public var resolutionDetails: String?
     public var thumbnailURL: URL?
     public var duration: String?
+    public var authorization: String?
 
     public init(
         id: UUID = UUID(),
@@ -80,7 +81,8 @@ public struct DownloadItem: Identifiable, Codable, Sendable {
         audioUrl: URL? = nil,
         resolutionDetails: String? = nil,
         thumbnailURL: URL? = nil,
-        duration: String? = nil
+        duration: String? = nil,
+        authorization: String? = nil
     ) {
         self.id = id
         self.url = url
@@ -115,6 +117,7 @@ public struct DownloadItem: Identifiable, Codable, Sendable {
         self.referer = referer
         self.userAgent = userAgent
         self.cookie = cookie
+        self.authorization = authorization
         self.quality = quality ?? Self.extractQuality(from: self.filename)
         self.category = category == .other ? Self.detectCategory(for: self.filename) : category
     }

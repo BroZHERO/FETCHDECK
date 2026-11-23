@@ -772,10 +772,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (meta.audioUrl) {
       sunoMetadataMap.set(meta.audioUrl, meta);
     }
+    if (meta.downloadUrl) {
+      sunoMetadataMap.set(meta.downloadUrl, meta);
+    }
     if (tabId && tabMediaMap.has(tabId)) {
       const list = tabMediaMap.get(tabId);
       for (const item of list) {
         if ((meta.uuid && item.url.includes(meta.uuid)) || (meta.audioUrl && item.url === meta.audioUrl)) {
+          if (meta.downloadUrl) {
+            item.url = meta.downloadUrl;
+          }
+          if (meta.authToken) {
+            item.authToken = meta.authToken;
+          }
           if (meta.title) {
             item.title = meta.title;
             item.label = `Suno AI: ${meta.title}`;

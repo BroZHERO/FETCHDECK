@@ -145,6 +145,13 @@ body {
   color: #8e8e93;
 }
 
+.media-row-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
 .download-pill-btn {
   background: linear-gradient(135deg, #007aff, #0051ba);
   color: #fff;
@@ -161,6 +168,24 @@ body {
 .download-pill-btn:hover {
   transform: translateY(-1px);
   box-shadow: 0 4px 10px rgba(0, 122, 255, 0.5);
+}
+
+.browser-pill-btn {
+  background: rgba(255, 255, 255, 0.12);
+  color: #f5f5f7;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.browser-pill-btn:hover {
+  background: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.35);
+  transform: translateY(-1px);
 }
 
 .quick-add-section {

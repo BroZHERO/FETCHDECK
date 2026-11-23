@@ -165,6 +165,7 @@ public final class LocalApiServer: @unchecked Sendable {
                         let referer = (json["referer"] as? String) ?? (json["pageUrl"] as? String)
                         let userAgent = json["userAgent"] as? String
                         let cookie = json["cookie"] as? String
+                        let authorization = json["authorization"] as? String
                         let quality = json["quality"] as? String
                         let resolutionDetails = json["dimensions"] as? String ?? json["resolutionDetails"] as? String
                         let audioUrlString = json["audioUrl"] as? String
@@ -181,9 +182,20 @@ public final class LocalApiServer: @unchecked Sendable {
                             downloadCat = .video
                         }
 
+                        var finalUrl = url
+                        let isSuno = urlString.contains("suno.ai") || urlString.contains("suno.com")
+                        if isSuno && !urlString.contains("Key-Pair-Id") && !urlString.contains("Signature") && !urlString.contains("token") {
+                            if let match = urlString.range(of: "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", options: .regularExpression) {
+                                let uuid = String(urlString[match])
+                                if let resolved = await resolveSunoClipDownloadUrl(uuid: uuid, authorization: authorization, cookie: cookie) {
+                                    finalUrl = resolved
+                                }
+                            }
+                        }
+
                         Task { @MainActor in
                             DownloadManager.shared.addDownload(
-                                url: url,
+                                url: finalUrl,
                                 filename: filename,
                                 referer: referer,
                                 userAgent: userAgent,
@@ -193,6 +205,7 @@ public final class LocalApiServer: @unchecked Sendable {
                                 resolutionDetails: resolutionDetails,
                                 thumbnailURL: thumbnailURL,
                                 duration: duration,
+                                authorization: authorization,
                                 category: downloadCat,
                                 autoStart: true
                             )
@@ -207,6 +220,43 @@ public final class LocalApiServer: @unchecked Sendable {
         }
 
         return makeHttpResponse(status: 404, body: "{\"error\":\"Not Found\"}")
+    }
+
+    private func resolveSunoClipDownloadUrl(uuid: String, authorization: String?, cookie: String?) async -> URL? {
+        let endpoint = "https://studio-api.prod.suno.com/api/download/clip/\(uuid)?format=mp3"
+        guard let apiUrl = URL(string: endpoint) else { return nil }
+
+        var req = URLRequest(url: apiUrl)
+        req.httpMethod = "GET"
+        if let auth = authorization {
+            req.setValue(auth, forHTTPHeaderField: "Authorization")
+        }
+        if let ck = cookie {
+            req.setValue(ck, forHTTPHeaderField: "Cookie")
+        }
+        req.setValue("https://suno.com", forHTTPHeaderField: "Origin")
+        req.setValue("https://suno.com/", forHTTPHeaderField: "Referer")
+        req.setValue("application/json, text/plain, */*", forHTTPHeaderField: "Accept")
+
+        for _ in 0..<5 {
+            guard let (data, response) = try? await URLSession.shared.data(for: req),
+                  let http = response as? HTTPURLResponse, http.statusCode == 200,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let status = json["status"] as? String else {
+                break
+            }
+
+            if status == "ready", let downloadUrlStr = json["download_url"] as? String, let dUrl = URL(string: downloadUrlStr) {
+                return dUrl
+            }
+
+            if status == "processing" {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                continue
+            }
+            break
+        }
+        return nil
     }
 
     private func makeHttpResponse(status: Int, body: String) -> String {
