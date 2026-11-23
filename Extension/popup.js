@@ -43,6 +43,23 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  function isValidTitle(text) {
+    if (!text || typeof text !== "string") return false;
+    const clean = text.trim();
+    if (clean.length < 2) return false;
+    if (/^[-_:\s0-9/.]+$/.test(clean)) return false;
+    if (clean.includes("--:--") || /^\d+:\d+/.test(clean)) return false;
+    const lower = clean.toLowerCase();
+    if (/^v\d+([-_\s][a-z0-9]+)?$/i.test(lower)) return false;
+    const uiKeywords = [
+      "remix", "share", "publish", "v4", "v3", "v2", "mini", "preview",
+      "explore", "library", "create", "upgrade", "upgrade to pro",
+      "earn credits", "home", "studio", "settings", "audio", "history"
+    ];
+    if (uiKeywords.includes(lower)) return false;
+    return true;
+  }
+
   function renderPopupMedia(media, tab) {
     mediaCount.innerText = media.length;
 
@@ -56,7 +73,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         const isSuno = (item.url && (item.url.includes(".suno.ai") || item.url.includes(".suno.com") || item.url.includes("audiopipe"))) || (item.label && item.label.includes("Suno AI"));
 
         const icon = isAudio ? "🎵" : "🎬";
-        const title = item.title || item.label || `media_stream_${index + 1}`;
+        const title = (isValidTitle(item.title) ? item.title : (isValidTitle(item.label) ? item.label : `media_stream_${index + 1}`));
         const formattedSize = item.formattedSize || (item.size > 0 ? ` • ${(item.size / (1024 * 1024)).toFixed(1)} MB` : "");
         const qualityStr = item.quality ? `[${item.quality}] ` : "";
         const dimStr = item.dimensions ? ` • ${item.dimensions}` : "";
@@ -72,7 +89,18 @@ document.addEventListener("DOMContentLoaded", async () => {
 
         const btn = row.querySelector(".download-pill-btn");
         btn.addEventListener("click", () => {
-          let baseTitle = item.title || (tab.title || "media").replace(/ - YouTube$/, "").replace(/\s*\|\s*Suno.*$/i, "").replace(/[\\/:*?"<>|]/g, "_").trim();
+          let baseTitle = item.title;
+          if (!isValidTitle(baseTitle)) {
+            baseTitle = (tab?.title || "").replace(/ - YouTube$/, "").replace(/\s*\|\s*Suno.*$/i, "").replace(/[\\/:*?"<>|]/g, "_").trim();
+          }
+          if (isSuno && !isValidTitle(baseTitle)) {
+            const match = item.url.match(/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/);
+            baseTitle = match ? `Suno_Track_${match[1].substring(0, 8)}` : "Suno_AI_Song";
+          }
+          if (!isValidTitle(baseTitle)) {
+            baseTitle = isSuno ? "Suno_AI_Song" : "media_stream";
+          }
+
           let ext = "mp4";
           if (isAudio || isSuno) {
             if (item.url.includes(".mp3") || (item.format && item.format.includes("MP3")) || isSuno) {

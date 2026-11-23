@@ -294,13 +294,33 @@
   let activeFloatingPill = null;
   let currentAudioItem = null;
 
+  function isValidTitle(text) {
+    if (!text || typeof text !== "string") return false;
+    const clean = text.trim();
+    if (clean.length < 2) return false;
+    // Reject strings with only numbers, dashes, colons, slashes, spaces (e.g. "--:--", "--_--", "0:05", "6:22")
+    if (/^[-_:\s0-9/.]+$/.test(clean)) return false;
+    if (clean.includes("--:--") || /^\d+:\d+/.test(clean)) return false;
+    const lower = clean.toLowerCase();
+    if (/^v\d+([-_\s][a-z0-9]+)?$/i.test(lower)) return false;
+    const uiKeywords = [
+      "remix", "share", "publish", "v4", "v3", "v2", "mini", "preview",
+      "explore", "library", "create", "upgrade", "upgrade to pro",
+      "earn credits", "home", "studio", "settings", "audio", "history",
+      "liked", "public", "uploads", "filters", "songs", "playlists",
+      "albums", "workspaces", "hooks"
+    ];
+    if (uiKeywords.includes(lower)) return false;
+    return true;
+  }
+
   function isIgnoredMediaUrl(url) {
     if (!url || typeof url !== "string") return true;
     if (url.startsWith("blob:") || url.startsWith("data:") || url.startsWith("javascript:")) return true;
 
     const lower = url.toLowerCase();
 
-    // 1. Explicit placeholder / forbidden / error URLs
+    // 1. Explicit placeholder / dummy / forbidden URLs
     if (
       lower.includes("forbidden") ||
       lower.includes("silence") ||
@@ -312,15 +332,32 @@
       return true;
     }
 
-    // 2. Reject studio-api non-media calls
-    if (lower.includes("studio-api.") && !lower.match(/\.(mp3|mp4|wav|m4a|aac)(\?|$)/i)) {
+    // 2. Universal telemetry, analytics, logging, tracking, and beacon endpoints
+    if (
+      lower.includes("s.prod.suno.com") ||
+      lower.includes("/rgstr") ||
+      lower.includes("telemetry") ||
+      lower.includes("analytics") ||
+      lower.includes("/beacon") ||
+      lower.includes("/stats") ||
+      lower.includes("/track") ||
+      lower.includes("/logging") ||
+      lower.includes("doubleclick") ||
+      lower.includes("google-analytics") ||
+      lower.includes("googletagmanager") ||
+      lower.includes("clarity.ms") ||
+      lower.includes("hotjar")
+    ) {
       return true;
     }
 
-    const isSunoCdn = lower.includes("cdn1.suno.ai") || lower.includes("cdn2.suno.ai") || lower.includes("audiopipe.suno.ai");
-    const hasUuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(lower);
-    if ((lower.includes("suno.com") || lower.includes("suno.ai")) && !isSunoCdn && !hasUuid) {
-      return true;
+    // 3. Suno AI specific filters
+    if (lower.includes("suno.com") || lower.includes("suno.ai")) {
+      const isSunoCdn = lower.includes("cdn1.suno.ai") || lower.includes("cdn2.suno.ai") || lower.includes("audiopipe.suno.ai");
+      const isMediaFile = /\.(mp3|wav|ogg|flac|m4a|aac|mp4|webm)(\?|$)/i.test(lower);
+      if (!isSunoCdn && !isMediaFile) {
+        return true;
+      }
     }
 
     return false;
@@ -345,84 +382,116 @@
     let title = "";
     let artist = "Suno AI";
     let imageUrl = "";
+    let uuid = null;
+
+    // Check for direct /song/UUID link inside playerBar
+    const songLink = playerBar.querySelector('a[href*="/song/"]');
+    if (songLink) {
+      const href = songLink.getAttribute("href") || "";
+      const match = href.match(/\/song\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/);
+      if (match) uuid = match[1];
+      const linkText = songLink.innerText.trim();
+      if (isValidTitle(linkText)) title = linkText;
+    }
 
     const img = playerBar.querySelector("img");
-    if (img && img.src && !img.src.includes("avatar")) imageUrl = img.src;
+    if (img && img.src && !img.src.includes("avatar")) {
+      imageUrl = img.src;
+      const imgMatch = img.src.match(/image_([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/);
+      if (imgMatch && !uuid) uuid = imgMatch[1];
+    }
 
-    const titleCandidates = playerBar.querySelectorAll('a, h3, h4, [class*="title"], [class*="Title"], [class*="font-semibold"], [class*="font-bold"], span, div');
-    for (const c of titleCandidates) {
-      const text = c.innerText.trim();
-      if (text && text.length >= 2 && !/^\d+:\d+/.test(text) && !["remix", "share", "publish", "v4", "v3", "mini", "explore", "library"].includes(text.toLowerCase()) && c.children.length <= 1) {
-        title = text;
-        break;
+    if (!title) {
+      const titleCandidates = playerBar.querySelectorAll('a, h3, h4, [class*="title"], [class*="Title"], [class*="font-semibold"], [class*="font-bold"], span, div');
+      for (const c of titleCandidates) {
+        const text = c.innerText.trim();
+        if (isValidTitle(text) && c.children.length <= 1) {
+          title = text;
+          break;
+        }
       }
     }
 
     const artistCandidates = playerBar.querySelectorAll('a[href*="/@"], [class*="creator"], [class*="user"], [class*="artist"], [class*="text-muted"], [class*="text-zinc"]');
     for (const a of artistCandidates) {
       const text = a.innerText.trim();
-      if (text && text !== title && !text.includes(":")) {
+      if (text && text !== title && isValidTitle(text) && !text.includes(":")) {
         artist = text;
         break;
       }
     }
 
-    return { playerBar, title, artist, imageUrl };
+    return { playerBar, title, artist, imageUrl, uuid };
   }
 
   function checkSunoActivePlayback() {
     const pInfo = getSunoActivePlayerInfo();
-    if (!pInfo || !pInfo.title) return;
+    let title = pInfo ? pInfo.title : "";
+    let artist = pInfo ? pInfo.artist : "Suno AI";
+    let imageUrl = pInfo ? pInfo.imageUrl : "";
+    let uuid = pInfo ? pInfo.uuid : null;
 
-    let track = null;
-    let uuid = null;
-
-    // 1. Try finding UUID from player cover image (e.g. image_UUID.png)
-    if (pInfo.imageUrl) {
-      const imgMatch = pInfo.imageUrl.match(/image_([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/);
-      if (imgMatch) uuid = imgMatch[1];
-    }
-
-    // 2. Try looking up in sunoTrackMap by title
-    if (!uuid) {
-      track = sunoTrackMap.get(pInfo.title.trim().toLowerCase());
-      if (track) uuid = track.id;
-    }
-
-    // 3. Try finding active playing row (has Pause icon/button) in the DOM
-    if (!uuid) {
-      const pauseIcons = document.querySelectorAll('button[aria-label*="Pause"], button[aria-label*="pause"], svg[data-icon="pause"], svg[aria-label="pause"], [class*="pause"], [class*="Pause"]');
-      for (const pi of pauseIcons) {
-        const row = pi.closest('[data-testid*="song"], [data-testid*="track"], div[class*="row"], div[class*="card"], div[class*="item"]');
-        if (row) {
-          const rowHtml = row.outerHTML;
-          const match = rowHtml.match(/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/);
+    // 1. Try finding active playing row (has Pause icon/button) in the DOM
+    const pauseIcons = document.querySelectorAll('button[aria-label*="Pause"], button[aria-label*="pause"], svg[data-icon="pause"], svg[aria-label="pause"], [class*="pause"], [class*="Pause"]');
+    for (const pi of pauseIcons) {
+      const row = pi.closest('[data-testid*="song"], [data-testid*="track"], div[class*="row"], div[class*="card"], div[class*="item"]');
+      if (row) {
+        const rowSongLink = row.querySelector('a[href*="/song/"]');
+        if (rowSongLink) {
+          const href = rowSongLink.getAttribute("href") || "";
+          const match = href.match(/\/song\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/);
           if (match) {
             uuid = match[1];
-            break;
+            if (!title && isValidTitle(rowSongLink.innerText.trim())) {
+              title = rowSongLink.innerText.trim();
+            }
           }
         }
+        if (!imageUrl) {
+          const rImg = row.querySelector("img");
+          if (rImg && rImg.src && !rImg.src.includes("avatar")) imageUrl = rImg.src;
+        }
+        if (uuid) break;
       }
     }
 
-    // 4. Fallback search across all page text for UUID
+    // 2. Lookup in sunoTrackMap if we have UUID or title
+    if (uuid && sunoTrackMap.has(uuid)) {
+      const t = sunoTrackMap.get(uuid);
+      if (t.title && (!title || !isValidTitle(title))) title = t.title;
+      if (t.artist) artist = t.artist;
+      if (t.imageUrl && !imageUrl) imageUrl = t.imageUrl;
+    } else if (title && isValidTitle(title) && sunoTrackMap.has(title.trim().toLowerCase())) {
+      const t = sunoTrackMap.get(title.trim().toLowerCase());
+      if (t.id && !uuid) uuid = t.id;
+      if (t.artist) artist = t.artist;
+      if (t.imageUrl && !imageUrl) imageUrl = t.imageUrl;
+    }
+
+    // 3. Fallback: If still no UUID, check active audio element src
     if (!uuid) {
-      const allMatches = document.body.innerHTML.match(/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/g);
-      if (allMatches && allMatches.length > 0) {
-        uuid = allMatches[0];
+      const audioEl = document.querySelector("audio");
+      if (audioEl) {
+        const src = audioEl.currentSrc || audioEl.src || "";
+        const match = src.match(/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/);
+        if (match) uuid = match[1];
       }
     }
 
     if (!uuid) return;
 
+    if (!title || !isValidTitle(title)) {
+      title = `Suno Track ${uuid.substring(0, 8)}`;
+    }
+
     const audioUrl = `https://cdn1.suno.ai/${uuid}.mp3`;
     const item = {
       url: audioUrl,
       audioUrl: null,
-      label: `Suno AI: ${pInfo.title}`,
-      title: pInfo.title,
-      artist: pInfo.artist,
-      thumbnail: pInfo.imageUrl || null,
+      label: `Suno AI: ${title}`,
+      title: title,
+      artist: artist,
+      thumbnail: imageUrl || null,
       quality: "320 kbps MP3",
       dimensions: "Suno Master",
       format: "MP3 Audio",
@@ -433,11 +502,33 @@
       formattedSize: "320 kbps MP3"
     };
 
+    sunoTrackMap.set(uuid, item);
+    sunoTrackMap.set(title.trim().toLowerCase(), item);
+    sunoTrackMap.set(audioUrl, item);
+
+    // Register with background service worker
+    chrome.runtime.sendMessage({
+      action: "register_suno_metadata",
+      metadata: {
+        uuid: uuid,
+        audioUrl: audioUrl,
+        title: title,
+        artist: artist,
+        imageUrl: imageUrl
+      }
+    });
+
+    chrome.runtime.sendMessage({
+      action: "register_client_media",
+      mediaList: [item]
+    });
+
     // Render floating audio pill
     renderFloatingAudioPill(item);
 
     // Also dock in-player button inside the bottom player bar if available
-    dockInPlayerButton(pInfo.playerBar, item);
+    dockInPlayerButton(pInfo ? pInfo.playerBar : null, item);
+  }
 
     // Register with background so toolbar popup has it
     chrome.runtime.sendMessage({
@@ -885,7 +976,25 @@
     const isAudio = item.type === "audio" || (item.format && item.format.toLowerCase().includes("audio"));
     const isSuno = item.url.includes(".suno.ai") || item.url.includes(".suno.com") || item.url.includes("audiopipe");
 
-    let rawTitle = item.title || (cachedVideoDetails && cachedVideoDetails.title) || document.title || "media_download";
+    let rawTitle = item.title;
+    if (!isValidTitle(rawTitle)) {
+      rawTitle = (cachedVideoDetails && cachedVideoDetails.title) || "";
+    }
+    if (isSuno && !isValidTitle(rawTitle)) {
+      const uuidMatch = item.url.match(/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/);
+      if (uuidMatch && sunoTrackMap.has(uuidMatch[1])) {
+        rawTitle = sunoTrackMap.get(uuidMatch[1]).title;
+      }
+      if (!isValidTitle(rawTitle) && uuidMatch) {
+        rawTitle = `Suno_Track_${uuidMatch[1].substring(0, 8)}`;
+      }
+    }
+    if (!isValidTitle(rawTitle) && !isSuno) {
+      rawTitle = document.title || "media_download";
+    }
+    if (!isValidTitle(rawTitle)) {
+      rawTitle = isSuno ? "Suno_AI_Song" : "media_download";
+    }
     rawTitle = rawTitle.replace(/ - YouTube$/, "").replace(/\s*\|\s*Suno.*$/i, "").replace(/[\\/:*?"<>|]/g, "_").trim();
 
     let ext = "mp4";
@@ -976,24 +1085,46 @@
       if (!match) return;
       const uuid = match[1];
       if (seenUuids.has(uuid)) return;
-      seenUuids.add(uuid);
 
-      const title = link.innerText.trim();
-      if (!title || title.length < 2) return;
+      const card = link.closest('[data-testid*="song"], [data-testid*="track"], div[class*="row"], div[class*="card"], div[class*="item"]') || link.parentElement?.parentElement;
+
+      // Extract title with high resilience
+      let title = "";
+      const linkText = link.innerText.trim();
+      if (isValidTitle(linkText)) {
+        title = linkText;
+      }
+      if (!title && card) {
+        const titleCandidates = card.querySelectorAll('a[href*="/song/"], [class*="title"], [class*="Title"], h3, h4, [class*="font-semibold"], [class*="font-bold"], span');
+        for (const tc of titleCandidates) {
+          const tText = tc.innerText.trim();
+          if (isValidTitle(tText)) {
+            title = tText;
+            break;
+          }
+        }
+      }
+      if (!title && sunoTrackMap.has(uuid)) {
+        title = sunoTrackMap.get(uuid).title;
+      }
+      if (!title) {
+        title = `Suno Track ${uuid.substring(0, 8)}`;
+      }
+
+      seenUuids.add(uuid);
 
       const mp3Url = `https://cdn1.suno.ai/${uuid}.mp3`;
       let imageUrl = null;
       let artist = "Suno AI";
 
-      const card = link.closest('[data-testid*="song"], [data-testid*="track"], div[class*="row"], div[class*="card"], div[class*="item"]') || link.parentElement?.parentElement;
       if (card) {
         const img = card.querySelector("img");
         if (img && img.src && !img.src.includes("avatar")) imageUrl = img.src;
-        const artistEl = card.querySelector('a[href*="/@"], span[class*="creator"], span[class*="user"]');
-        if (artistEl) artist = artistEl.innerText.trim();
+        const artistEl = card.querySelector('a[href*="/@"], span[class*="creator"], span[class*="user"], span[class*="artist"]');
+        if (artistEl && isValidTitle(artistEl.innerText.trim())) artist = artistEl.innerText.trim();
       }
 
-      discovered.push({
+      const item = {
         url: mp3Url,
         audioUrl: null,
         label: `Suno AI: ${title}`,
@@ -1008,7 +1139,13 @@
         combined: true,
         size: 0,
         formattedSize: "320 kbps MP3"
-      });
+      };
+
+      sunoTrackMap.set(uuid, item);
+      sunoTrackMap.set(title.trim().toLowerCase(), item);
+      sunoTrackMap.set(mp3Url, item);
+
+      discovered.push(item);
     });
 
     if (discovered.length > 0) {

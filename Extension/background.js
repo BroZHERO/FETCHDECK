@@ -332,7 +332,7 @@ function isIgnoredMediaUrl(url) {
 
   const lower = url.toLowerCase();
 
-  // 1. Explicit placeholder / forbidden / error URLs
+  // 1. Explicit placeholder / dummy / forbidden URLs
   if (
     lower.includes("forbidden") ||
     lower.includes("silence") ||
@@ -344,14 +344,30 @@ function isIgnoredMediaUrl(url) {
     return true;
   }
 
-  // 2. Suno AI specific filters
+  // 2. Universal telemetry, analytics, logging, tracking, and beacon endpoints
+  if (
+    lower.includes("s.prod.suno.com") ||
+    lower.includes("/rgstr") ||
+    lower.includes("telemetry") ||
+    lower.includes("analytics") ||
+    lower.includes("/beacon") ||
+    lower.includes("/stats") ||
+    lower.includes("/track") ||
+    lower.includes("/logging") ||
+    lower.includes("doubleclick") ||
+    lower.includes("google-analytics") ||
+    lower.includes("googletagmanager") ||
+    lower.includes("clarity.ms") ||
+    lower.includes("hotjar")
+  ) {
+    return true;
+  }
+
+  // 3. Suno AI specific filters
   if (lower.includes("suno.com") || lower.includes("suno.ai")) {
-    if (lower.includes("studio-api.") && !lower.match(/\.(mp3|mp4|wav|m4a|aac)(\?|$)/i)) {
-      return true;
-    }
     const isSunoCdn = lower.includes("cdn1.suno.ai") || lower.includes("cdn2.suno.ai") || lower.includes("audiopipe.suno.ai");
-    const hasUuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(lower);
-    if (!isSunoCdn && !hasUuid) {
+    const isMediaFile = /\.(mp3|wav|ogg|flac|m4a|aac|mp4|webm)(\?|$)/i.test(lower);
+    if (!isSunoCdn && !isMediaFile) {
       return true;
     }
   }
@@ -779,6 +795,82 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
+async function getCookiesForPayload(payload) {
+  const cookieMap = new Map();
+
+  async function addCookies(filter) {
+    try {
+      const list = await chrome.cookies.getAll(filter);
+      if (list && Array.isArray(list)) {
+        for (const c of list) {
+          if (c && c.name && c.value !== undefined) {
+            cookieMap.set(c.name, c.value);
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
+  // 1. Direct stream URL & domain
+  if (payload.url) {
+    await addCookies({ url: payload.url });
+    try {
+      const u = new URL(payload.url);
+      await addCookies({ domain: u.hostname });
+      const parts = u.hostname.split(".");
+      if (parts.length >= 2) {
+        const root = parts.slice(-2).join(".");
+        await addCookies({ domain: root });
+        await addCookies({ domain: "." + root });
+      }
+    } catch (e) {}
+  }
+
+  // 2. Referer / Page URL & domain
+  const refUrl = payload.referer || payload.pageUrl;
+  if (refUrl) {
+    await addCookies({ url: refUrl });
+    try {
+      const u = new URL(refUrl);
+      await addCookies({ domain: u.hostname });
+      const parts = u.hostname.split(".");
+      if (parts.length >= 2) {
+        const root = parts.slice(-2).join(".");
+        await addCookies({ domain: root });
+        await addCookies({ domain: "." + root });
+      }
+    } catch (e) {}
+  }
+
+  // 3. Explicit Suno AI domains (collects CloudFront signed cookies and session tokens)
+  const isSuno = (payload.url && (payload.url.includes("suno.ai") || payload.url.includes("suno.com"))) ||
+                 (refUrl && (refUrl.includes("suno.ai") || refUrl.includes("suno.com")));
+  if (isSuno) {
+    await addCookies({ url: "https://suno.com" });
+    await addCookies({ url: "https://suno.ai" });
+    await addCookies({ url: "https://cdn1.suno.ai" });
+    await addCookies({ domain: "suno.com" });
+    await addCookies({ domain: ".suno.com" });
+    await addCookies({ domain: "suno.ai" });
+    await addCookies({ domain: ".suno.ai" });
+  }
+
+  // 4. Explicit YouTube domains
+  const isYouTube = (payload.url && payload.url.includes("googlevideo.com")) ||
+                    (refUrl && refUrl.includes("youtube.com"));
+  if (isYouTube) {
+    await addCookies({ url: "https://www.youtube.com" });
+    await addCookies({ domain: ".youtube.com" });
+  }
+
+  if (cookieMap.size === 0) return "";
+  const cookiePairs = [];
+  for (const [name, value] of cookieMap.entries()) {
+    cookiePairs.push(`${name}=${value}`);
+  }
+  return cookiePairs.join("; ");
+}
+
 async function sendDownloadToApp(payload) {
   if (!payload.url || payload.url.startsWith("blob:") || payload.url.startsWith("data:")) {
     throw new Error("Invalid or unsupported stream URL. Blob URLs cannot be downloaded directly.");
@@ -797,11 +889,11 @@ async function sendDownloadToApp(payload) {
     }
   }
 
-  // Forward Chrome YouTube session cookies
+  // Collect ambient session cookies for the target site and CloudFront CDN
   try {
-    const cookies = await chrome.cookies.getAll({ url: "https://www.youtube.com" });
-    if (cookies && cookies.length > 0) {
-      payload.cookie = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+    const cookieHeader = await getCookiesForPayload(payload);
+    if (cookieHeader) {
+      payload.cookie = cookieHeader;
     }
   } catch (e) {}
 

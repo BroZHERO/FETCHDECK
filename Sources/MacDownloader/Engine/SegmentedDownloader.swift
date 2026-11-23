@@ -389,9 +389,18 @@ public actor SegmentedDownloader {
 
         var headRequest = URLRequest(url: url)
         headRequest.httpMethod = "HEAD"
+        let isSuno = url.host?.contains("suno.ai") == true || url.host?.contains("suno.com") == true
         if let referer = referer { headRequest.setValue(referer, forHTTPHeaderField: "Referer") }
         if let userAgent = userAgent { headRequest.setValue(userAgent, forHTTPHeaderField: "User-Agent") }
         if let cookie = cookie { headRequest.setValue(cookie, forHTTPHeaderField: "Cookie") }
+        if isSuno {
+            headRequest.setValue("https://suno.com", forHTTPHeaderField: "Origin")
+            if headRequest.value(forHTTPHeaderField: "Referer") == nil {
+                headRequest.setValue("https://suno.com/", forHTTPHeaderField: "Referer")
+            }
+            headRequest.setValue("*/*", forHTTPHeaderField: "Accept")
+            headRequest.setValue("identity;q=1, *;q=0", forHTTPHeaderField: "Accept-Encoding")
+        }
 
         if let (_, response) = try? await session.data(for: headRequest),
            let httpResponse = response as? HTTPURLResponse,
@@ -409,6 +418,14 @@ public actor SegmentedDownloader {
         if let referer = referer { rangeRequest.setValue(referer, forHTTPHeaderField: "Referer") }
         if let userAgent = userAgent { rangeRequest.setValue(userAgent, forHTTPHeaderField: "User-Agent") }
         if let cookie = cookie { rangeRequest.setValue(cookie, forHTTPHeaderField: "Cookie") }
+        if isSuno {
+            rangeRequest.setValue("https://suno.com", forHTTPHeaderField: "Origin")
+            if rangeRequest.value(forHTTPHeaderField: "Referer") == nil {
+                rangeRequest.setValue("https://suno.com/", forHTTPHeaderField: "Referer")
+            }
+            rangeRequest.setValue("*/*", forHTTPHeaderField: "Accept")
+            rangeRequest.setValue("identity;q=1, *;q=0", forHTTPHeaderField: "Accept-Encoding")
+        }
 
         if let (_, response) = try? await session.data(for: rangeRequest),
            let httpResponse = response as? HTTPURLResponse {
@@ -471,6 +488,22 @@ public actor SegmentedDownloader {
         if let userAgent = userAgent { request.setValue(userAgent, forHTTPHeaderField: "User-Agent") }
         if let cookie = cookie { request.setValue(cookie, forHTTPHeaderField: "Cookie") }
 
+        let isSuno = targetURL.host?.contains("suno.ai") == true || targetURL.host?.contains("suno.com") == true
+        if isSuno {
+            request.setValue("https://suno.com", forHTTPHeaderField: "Origin")
+            if request.value(forHTTPHeaderField: "Referer") == nil {
+                request.setValue("https://suno.com/", forHTTPHeaderField: "Referer")
+            }
+            request.setValue("cors", forHTTPHeaderField: "Sec-Fetch-Mode")
+            request.setValue("cross-site", forHTTPHeaderField: "Sec-Fetch-Site")
+            request.setValue("audio", forHTTPHeaderField: "Sec-Fetch-Dest")
+            request.setValue("*/*", forHTTPHeaderField: "Accept")
+            request.setValue("identity;q=1, *;q=0", forHTTPHeaderField: "Accept-Encoding")
+            if request.value(forHTTPHeaderField: "User-Agent") == nil {
+                request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
+            }
+        }
+
         if isGoogleVideo {
             request.setValue("https://www.youtube.com", forHTTPHeaderField: "Origin")
             request.setValue("https://www.youtube.com/", forHTTPHeaderField: "Referer")
@@ -500,7 +533,11 @@ public actor SegmentedDownloader {
                 let statusMsg = HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
                 let detailMsg: String
                 if http.statusCode == 403 {
-                    detailMsg = "Access restricted (HTTP 403 Forbidden). The stream URL may have expired, or requires session authentication. Try the 'Browser' download button to save directly."
+                    if isSuno {
+                        detailMsg = "Suno CDN access restricted (HTTP 403 Forbidden). Session cookies or CloudFront signature missing. Use the 'Browser' download button in the extension to save directly."
+                    } else {
+                        detailMsg = "Access restricted (HTTP 403 Forbidden). The stream URL may have expired, or requires session authentication. Try the 'Browser' download button to save directly."
+                    }
                 } else if http.statusCode == 404 {
                     detailMsg = "File not found (HTTP 404). The media stream may have expired or moved."
                 } else {
