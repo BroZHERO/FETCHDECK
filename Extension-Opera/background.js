@@ -29,12 +29,19 @@ const YOUTUBE_ITAGS = {
   249: { quality: "Audio", dimensions: "50 kbps Stereo", format: "Opus Audio", type: "audio", combined: false }
 };
 
-// Context Menus
+// Context Menus (Safely reset on reload to avoid duplicate ID errors)
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.contextMenus.create({
-    id: "macdl-download-link",
-    title: "Download with FETCHDECK",
-    contexts: ["link", "video", "audio", "image"]
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create(
+      {
+        id: "macdl-download-link",
+        title: "Download with FETCHDECK",
+        contexts: ["link", "video", "audio", "image"]
+      },
+      () => {
+        if (chrome.runtime.lastError) {} // Suppress duplicate ID warning
+      }
+    );
   });
 });
 
@@ -593,10 +600,18 @@ function registerMedia(tabId, mediaItem) {
 
   // Real-time broadcast to active tab so content.js can render floating badge / audio pill
   if (tabId > 0 && (mediaItem.type === "audio" || mediaItem.combined)) {
-    chrome.tabs.sendMessage(tabId, {
-      action: "macdl_media_detected",
-      media: mediaItem
-    }).catch(() => {});
+    try {
+      chrome.tabs.sendMessage(
+        tabId,
+        {
+          action: "macdl_media_detected",
+          media: mediaItem
+        },
+        () => {
+          if (chrome.runtime.lastError) {} // Suppress receiving end does not exist on unloaded tabs
+        }
+      );
+    } catch (e) {}
   }
 }
 

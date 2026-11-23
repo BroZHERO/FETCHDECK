@@ -8,6 +8,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Check MacDownloader App connectivity
   chrome.runtime.sendMessage({ action: "check_status" }, (res) => {
+    if (chrome.runtime.lastError) {}
     if (res && res.online) {
       statusPill.className = "status-pill online";
       statusPill.innerText = "● Connected";
@@ -28,6 +29,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     chrome.runtime.sendMessage({ action: "resolve_universal_media", videoId, url: tab.url, tabId: tab.id }, (res) => {
+      if (chrome.runtime.lastError) {}
       if (res && res.streams && res.streams.length > 0) {
         renderPopupMedia(res.streams, tab);
       } else {
@@ -38,6 +40,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   function fallbackGetTabMedia(tab) {
     chrome.runtime.sendMessage({ action: "get_tab_media", tabId: tab.id }, (res) => {
+      if (chrome.runtime.lastError) {}
       const media = (res && res.media) || [];
       renderPopupMedia(media, tab);
     });
@@ -168,6 +171,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     };
 
     chrome.runtime.sendMessage({ action: "send_to_app", payload }, (res) => {
+      if (chrome.runtime.lastError) {}
       if (res && res.success) {
         if (btnElement) btnElement.innerText = "✓ Sent";
         if (feedbackTarget) {

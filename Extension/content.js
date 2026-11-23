@@ -2,6 +2,16 @@
   if (window.__macdl_injected) return;
   window.__macdl_injected = true;
 
+  function safeSendMessage(msg, callback) {
+    try {
+      if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.id) return;
+      chrome.runtime.sendMessage(msg, (res) => {
+        const err = chrome.runtime.lastError;
+        if (callback) callback(res, err);
+      });
+    } catch (e) {}
+  }
+
   let cachedStreamingData = null;
   let cachedCapturedStreams = [];
   let cachedVideoDetails = null;
@@ -55,7 +65,7 @@
       }
 
       if (discovered.length > 0) {
-        chrome.runtime.sendMessage({
+        safeSendMessage({
           action: "register_client_media",
           mediaList: discovered
         });
@@ -507,7 +517,7 @@
     sunoTrackMap.set(audioUrl, item);
 
     // Register with background service worker
-    chrome.runtime.sendMessage({
+    safeSendMessage({
       action: "register_suno_metadata",
       metadata: {
         uuid: uuid,
@@ -518,7 +528,7 @@
       }
     });
 
-    chrome.runtime.sendMessage({
+    safeSendMessage({
       action: "register_client_media",
       mediaList: [item]
     });
@@ -528,13 +538,6 @@
 
     // Also dock in-player button inside the bottom player bar if available
     dockInPlayerButton(pInfo ? pInfo.playerBar : null, item);
-  }
-
-    // Register with background so toolbar popup has it
-    chrome.runtime.sendMessage({
-      action: "register_client_media",
-      mediaList: [item]
-    });
   }
 
   function dockInPlayerButton(playerBar, item) {
@@ -639,7 +642,7 @@
     if (isSuno) {
       meta = extractSunoMetadata(src);
       // Register with background service worker
-      chrome.runtime.sendMessage({
+      safeSendMessage({
         action: "register_suno_metadata",
         metadata: {
           uuid: meta.uuid,
@@ -674,7 +677,7 @@
     currentAudioItem = audioItem;
 
     // Register into background cache so popup picks it up immediately
-    chrome.runtime.sendMessage({
+    safeSendMessage({
       action: "register_client_media",
       mediaList: [audioItem]
     });
@@ -824,7 +827,7 @@
       }
 
       // Query universal resolver in background (supports YouTube, TikTok, Instagram, Twitter, Vimeo, and any video site)
-      chrome.runtime.sendMessage(
+      safeSendMessage(
         {
           action: "resolve_universal_media",
           url: window.location.href,
@@ -1029,7 +1032,7 @@
     };
 
     if (inBrowser) {
-      chrome.runtime.sendMessage({ action: "download_in_browser", payload }, (res) => {
+      safeSendMessage({ action: "download_in_browser", payload }, (res) => {
         if (res && res.success) {
           showTemporaryFeedback(button, "✓ Downloading in Browser", "macdl-success");
         } else {
@@ -1039,7 +1042,7 @@
       return;
     }
 
-    chrome.runtime.sendMessage({ action: "send_to_app", payload }, (res) => {
+    safeSendMessage({ action: "send_to_app", payload }, (res) => {
       if (res && res.success) {
         showTemporaryFeedback(button, "✓ Sent to FETCHDECK", "macdl-success");
       } else {
@@ -1149,7 +1152,7 @@
     });
 
     if (discovered.length > 0) {
-      chrome.runtime.sendMessage({
+      safeSendMessage({
         action: "register_client_media",
         mediaList: discovered
       });
