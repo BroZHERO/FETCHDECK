@@ -168,6 +168,14 @@ public final class LocalApiServer: @unchecked Sendable {
                         let thumbnailURL = thumbnailString != nil ? URL(string: thumbnailString!) : nil
                         let duration = json["duration"] as? String
 
+                        let categoryStr = (json["category"] as? String)?.lowercased()
+                        var downloadCat: DownloadCategory = .other
+                        if categoryStr == "audio" {
+                            downloadCat = .audio
+                        } else if categoryStr == "video" {
+                            downloadCat = .video
+                        }
+
                         Task { @MainActor in
                             DownloadManager.shared.addDownload(
                                 url: url,
@@ -180,6 +188,7 @@ public final class LocalApiServer: @unchecked Sendable {
                                 resolutionDetails: resolutionDetails,
                                 thumbnailURL: thumbnailURL,
                                 duration: duration,
+                                category: downloadCat,
                                 autoStart: true
                             )
                         }

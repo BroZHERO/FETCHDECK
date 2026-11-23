@@ -52,26 +52,55 @@ document.addEventListener("DOMContentLoaded", async () => {
         const row = document.createElement("div");
         row.className = "media-item";
 
-        const icon = item.type === "audio" ? "🎵" : "🎬";
-        const title = item.label || `media_stream_${index + 1}`;
+        const isAudio = item.type === "audio" || (item.format && item.format.toLowerCase().includes("audio"));
+        const isSuno = (item.url && (item.url.includes(".suno.ai") || item.url.includes(".suno.com") || item.url.includes("audiopipe"))) || (item.label && item.label.includes("Suno AI"));
+
+        const icon = isAudio ? "🎵" : "🎬";
+        const title = item.title || item.label || `media_stream_${index + 1}`;
         const formattedSize = item.formattedSize || (item.size > 0 ? ` • ${(item.size / (1024 * 1024)).toFixed(1)} MB` : "");
         const qualityStr = item.quality ? `[${item.quality}] ` : "";
         const dimStr = item.dimensions ? ` • ${item.dimensions}` : "";
+        const descType = isSuno ? "Suno AI Master" : (item.combined ? (isAudio ? "Direct Audio" : "Full Video") : (isAudio ? "Audio Only" : "Video + Audio Muxed"));
 
         row.innerHTML = `
           <div class="media-info">
             <div class="media-url" title="${item.url}">${icon} ${escapeHtml(title)}</div>
-            <div class="media-meta">${qualityStr}${item.combined ? "Full Video" : (item.type === "audio" ? "Audio Only" : "Video + Audio Muxed")}${dimStr}${formattedSize}</div>
+            <div class="media-meta">${qualityStr}${descType}${dimStr}${formattedSize}</div>
           </div>
           <button class="download-pill-btn" data-url="${item.url}">⬇ Download</button>
         `;
 
         const btn = row.querySelector(".download-pill-btn");
         btn.addEventListener("click", () => {
-          let pageTitle = (tab.title || "media").replace(/ - YouTube$/, "").replace(/[\\/:*?"<>|]/g, "_").trim();
-          const ext = item.url.includes(".m3u8") ? "mp4" : (item.type === "audio" ? "m4a" : "mp4");
-          const safeName = `[${item.quality || index + 1}] ${pageTitle}.${ext}`;
-          dispatchDownload(item.url, safeName, item.quality || "HD", tab.url, btn, null, item.audioUrl, item.dimensions);
+          let baseTitle = item.title || (tab.title || "media").replace(/ - YouTube$/, "").replace(/\s*\|\s*Suno.*$/i, "").replace(/[\\/:*?"<>|]/g, "_").trim();
+          let ext = "mp4";
+          if (isAudio || isSuno) {
+            if (item.url.includes(".mp3") || (item.format && item.format.includes("MP3")) || isSuno) {
+              ext = "mp3";
+            } else if (item.url.includes(".wav")) {
+              ext = "wav";
+            } else if (item.url.includes(".flac")) {
+              ext = "flac";
+            } else {
+              ext = "m4a";
+            }
+          }
+          const safeName = isSuno
+            ? `${baseTitle || "Suno_Track"} - Suno AI.${ext}`
+            : `[${item.quality || (isAudio ? "Audio" : index + 1)}] ${baseTitle}.${ext}`;
+
+          dispatchDownload(
+            item.url,
+            safeName,
+            item.quality || (isAudio ? "320 kbps MP3" : "HD"),
+            tab.url,
+            btn,
+            null,
+            item.audioUrl,
+            item.dimensions,
+            isAudio || isSuno ? "audio" : "video",
+            item.thumbnail
+          );
         });
 
         mediaList.appendChild(row);
@@ -83,10 +112,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   quickSendBtn.addEventListener("click", () => {
     const url = quickUrlInput.value.trim();
     if (!url) return;
-    dispatchDownload(url, null, "Direct", tab?.url, quickSendBtn, feedbackMsg);
+    const isAudioUrl = url.match(/\.(mp3|wav|m4a|aac|flac|ogg|opus)(\?|$)/i) || url.includes(".suno.ai") || url.includes("audiopipe");
+    dispatchDownload(url, null, isAudioUrl ? "Audio" : "Direct", tab?.url, quickSendBtn, feedbackMsg, null, null, isAudioUrl ? "audio" : "video");
   });
 
-  function dispatchDownload(url, filename, quality, referer, btnElement, feedbackTarget, audioUrl = null, dimensions = null) {
+  function dispatchDownload(url, filename, quality, referer, btnElement, feedbackTarget, audioUrl = null, dimensions = null, category = null, thumbnail = null) {
     if (!url || url.startsWith("blob:") || url.startsWith("data:")) {
       if (feedbackTarget) {
         feedbackTarget.style.color = "#ff3b30";
@@ -95,12 +125,16 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
+    const isAudio = category === "audio" || url.match(/\.(mp3|wav|m4a|aac|flac|ogg|opus)(\?|$)/i) || url.includes(".suno.ai") || url.includes("audiopipe");
+
     const payload = {
       url,
       audioUrl: audioUrl || null,
       filename: filename || url.split("/").pop().split("?")[0] || "download",
-      quality: quality || "HD",
+      quality: quality || (isAudio ? "320 kbps MP3" : "HD"),
       dimensions: dimensions || "",
+      category: isAudio ? "audio" : (category || "video"),
+      thumbnail: thumbnail || null,
       referer: referer || "",
       userAgent: navigator.userAgent
     };

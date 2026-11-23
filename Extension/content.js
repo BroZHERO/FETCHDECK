@@ -46,6 +46,7 @@
     if (lower.includes("720")) return "macdl-badge-720p";
     if (lower.includes("480")) return "macdl-badge-480p";
     if (lower.includes("360") || lower.includes("240")) return "macdl-badge-360p";
+    if (lower.includes("suno")) return "macdl-badge-suno";
     if (lower.includes("audio") || lower.includes("mp3")) return "macdl-badge-audio";
     return "macdl-badge-generic";
   }
@@ -230,13 +231,215 @@
     return list;
   }
 
+  let activeFloatingPill = null;
+  let currentAudioItem = null;
+
+  function extractSunoMetadata(audioUrl) {
+    const uuidMatch = audioUrl.match(/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/);
+    const uuid = uuidMatch ? uuidMatch[1] : null;
+
+    let title = "";
+    let artist = "";
+    let imageUrl = "";
+
+    if (uuid) {
+      // 1. Search for link containing this UUID
+      const link = document.querySelector(`a[href*="${uuid}"]`);
+      if (link) {
+        title = link.innerText.trim();
+        const card = link.closest('[data-testid*="song"], [data-testid*="track"], div[class*="row"], div[class*="card"], div[class*="item"]') || link.parentElement?.parentElement;
+        if (card) {
+          const img = card.querySelector("img");
+          if (img && img.src && !img.src.includes("avatar")) imageUrl = img.src;
+          const artistEl = card.querySelector('a[href*="/@"], span[class*="creator"], span[class*="user"], div[class*="user"]');
+          if (artistEl) artist = artistEl.innerText.trim();
+        }
+      }
+    }
+
+    // 2. Check bottom player bar
+    if (!title) {
+      const playerBar = document.querySelector('footer, [aria-label*="Player"], [data-testid*="player"], [class*="player-bar"], [class*="PlayerBar"]');
+      if (playerBar) {
+        const titleEl = playerBar.querySelector('a[href*="/song/"], [class*="title"], h3, h4, span[class*="font-bold"], div[class*="font-semibold"]');
+        if (titleEl) title = titleEl.innerText.trim();
+        const img = playerBar.querySelector("img");
+        if (img && img.src) imageUrl = img.src;
+        const artistEl = playerBar.querySelector('a[href*="/@"], [class*="creator"]');
+        if (artistEl) artist = artistEl.innerText.trim();
+      }
+    }
+
+    // 3. Check document.title (e.g., "Song Title by @artist | Suno" or "Song Title | Suno")
+    if (!title && document.title) {
+      let clean = document.title.replace(/\s*\|\s*Suno.*$/i, "").replace(/\s*-\s*Suno.*$/i, "").trim();
+      if (clean.includes(" by @")) {
+        const parts = clean.split(" by @");
+        title = parts[0].trim();
+        if (!artist) artist = "@" + parts[1].trim();
+      } else if (clean && clean.toLowerCase() !== "suno") {
+        title = clean;
+      }
+    }
+
+    if (!title && uuid) {
+      title = `Suno Track ${uuid.substring(0, 8)}`;
+    }
+
+    return {
+      uuid,
+      title: title || "Suno Track",
+      artist: artist || "Suno AI",
+      imageUrl: imageUrl || ""
+    };
+  }
+
+  function extractGenericAudioMetadata(mediaElement, audioUrl) {
+    let title = mediaElement.getAttribute("title") || mediaElement.getAttribute("aria-label");
+    if (!title) {
+      const parentWithTitle = mediaElement.closest("[title], [aria-label]");
+      if (parentWithTitle) title = parentWithTitle.getAttribute("title") || parentWithTitle.getAttribute("aria-label");
+    }
+    if (!title && document.title) {
+      title = document.title.replace(/[\\/:*?"<>|]/g, "_").trim();
+    }
+    if (!title) {
+      const fn = audioUrl.split("?")[0].split("/").pop();
+      if (fn) title = fn.replace(/\.[a-z0-9]+$/i, "");
+    }
+    return {
+      title: title || "Audio Track",
+      artist: window.location.hostname
+    };
+  }
+
+  function handleAudioSource(mediaElement, src) {
+    if (!src || src.startsWith("blob:") || src.startsWith("data:") || !src.startsWith("http")) return;
+
+    const isSuno = window.location.hostname.includes("suno.com") || window.location.hostname.includes("suno.ai") || src.includes(".suno.ai") || src.includes("audiopipe");
+    let meta = null;
+    if (isSuno) {
+      meta = extractSunoMetadata(src);
+      // Register with background service worker
+      chrome.runtime.sendMessage({
+        action: "register_suno_metadata",
+        metadata: {
+          uuid: meta.uuid,
+          title: meta.title,
+          artist: meta.artist,
+          audioUrl: src,
+          imageUrl: meta.imageUrl
+        }
+      });
+    } else {
+      meta = extractGenericAudioMetadata(mediaElement, src);
+    }
+
+    const extMatch = (src.split("?")[0].split(".").pop() || "mp3").toUpperCase();
+    const audioItem = {
+      url: src,
+      audioUrl: null,
+      label: isSuno ? `Suno AI: ${meta.title}` : `Audio: ${meta.title} (${extMatch})`,
+      title: meta.title,
+      artist: meta.artist,
+      thumbnail: meta.imageUrl || null,
+      quality: isSuno ? "320 kbps MP3" : extMatch,
+      dimensions: isSuno ? "Suno Master" : `${extMatch} Audio`,
+      format: isSuno ? "MP3 Audio" : `${extMatch} Audio`,
+      type: "audio",
+      category: "audio",
+      combined: true,
+      size: 0,
+      formattedSize: "Direct Audio"
+    };
+
+    currentAudioItem = audioItem;
+
+    // Register into background cache so popup picks it up immediately
+    chrome.runtime.sendMessage({
+      action: "register_client_media",
+      mediaList: [audioItem]
+    });
+
+    // Render persistent floating audio pill
+    renderFloatingAudioPill(audioItem);
+  }
+
+  function renderFloatingAudioPill(item) {
+    if (activeFloatingPill) {
+      activeFloatingPill.remove();
+      activeFloatingPill = null;
+    }
+
+    const pill = document.createElement("div");
+    pill.className = "macdl-audio-floating-pill";
+
+    const thumbHtml = item.thumbnail
+      ? `<img src="${escapeHtml(item.thumbnail)}" class="macdl-audio-thumb" alt="Cover"/>`
+      : `<div class="macdl-audio-icon-wrap"><span class="macdl-audio-note">🎵</span></div>`;
+
+    pill.innerHTML = `
+      <div class="macdl-audio-pill-inner">
+        ${thumbHtml}
+        <div class="macdl-audio-info">
+          <div class="macdl-audio-title" title="${escapeHtml(item.title || item.label)}">${escapeHtml(item.title || "Audio Track")}</div>
+          <div class="macdl-audio-sub">${escapeHtml(item.artist ? `${item.artist} • ` : "")}${escapeHtml(item.quality || "MP3 Audio")}</div>
+        </div>
+        <div class="macdl-audio-actions">
+          <button class="macdl-audio-btn-app" title="Send to FETCHDECK App">🚀 FetchDeck</button>
+          <button class="macdl-audio-btn-browser" title="Download in Browser">⬇ Browser</button>
+          <button class="macdl-audio-close" title="Dismiss">&times;</button>
+        </div>
+      </div>
+    `;
+
+    pill.querySelector(".macdl-audio-btn-app").addEventListener("click", (e) => {
+      e.stopPropagation();
+      dispatchDownload(item, pill.querySelector(".macdl-audio-btn-app"), false);
+    });
+
+    pill.querySelector(".macdl-audio-btn-browser").addEventListener("click", (e) => {
+      e.stopPropagation();
+      dispatchDownload(item, pill.querySelector(".macdl-audio-btn-browser"), true);
+    });
+
+    pill.querySelector(".macdl-audio-close").addEventListener("click", (e) => {
+      e.stopPropagation();
+      pill.remove();
+      activeFloatingPill = null;
+    });
+
+    document.body.appendChild(pill);
+    activeFloatingPill = pill;
+  }
+
   function attachOverlay(mediaElement) {
     if (mediaElement.dataset.macdlAttached === "true") return;
 
-    const rect = mediaElement.getBoundingClientRect();
-    if (rect.width < 120 && rect.height < 60) return;
+    const isAudio = mediaElement.tagName.toLowerCase() === "audio";
 
-    mediaElement.dataset.macdlAttached = "true";
+    // For audio elements: hook playback listeners to capture audio stream & show floating pill
+    if (isAudio) {
+      mediaElement.dataset.macdlAttached = "true";
+      const onAudioPlay = () => {
+        const src = getDirectSource(mediaElement);
+        if (src) handleAudioSource(mediaElement, src);
+      };
+      mediaElement.addEventListener("play", onAudioPlay);
+      mediaElement.addEventListener("playing", onAudioPlay);
+      mediaElement.addEventListener("loadedmetadata", onAudioPlay);
+      const initialSrc = getDirectSource(mediaElement);
+      if (initialSrc) handleAudioSource(mediaElement, initialSrc);
+
+      // Only attach in-place overlay button if audio element is visibly rendered
+      const rect = mediaElement.getBoundingClientRect();
+      if (rect.width < 100 || rect.height < 24) return;
+    } else {
+      // For video elements: skip tiny icons or decorative videos
+      const rect = mediaElement.getBoundingClientRect();
+      if (rect.width < 120 && rect.height < 60) return;
+      mediaElement.dataset.macdlAttached = "true";
+    }
 
     let parent = mediaElement.parentElement;
     if (!parent) return;
@@ -450,26 +653,39 @@
       return;
     }
 
-    let rawTitle = (cachedVideoDetails && cachedVideoDetails.title) || document.title || "media_download";
-    rawTitle = rawTitle.replace(/ - YouTube$/, "").replace(/[\\/:*?"<>|]/g, "_").trim();
+    const isAudio = item.type === "audio" || (item.format && item.format.toLowerCase().includes("audio"));
+    const isSuno = item.url.includes(".suno.ai") || item.url.includes(".suno.com") || item.url.includes("audiopipe");
 
-    const qTag = item.quality ? `[${item.quality}] ` : "";
+    let rawTitle = item.title || (cachedVideoDetails && cachedVideoDetails.title) || document.title || "media_download";
+    rawTitle = rawTitle.replace(/ - YouTube$/, "").replace(/\s*\|\s*Suno.*$/i, "").replace(/[\\/:*?"<>|]/g, "_").trim();
+
     let ext = "mp4";
-    if (item.quality === "MP3") {
-      ext = "mp3";
-    } else if (item.type === "audio") {
-      ext = "m4a";
+    if (isAudio || item.quality === "MP3" || isSuno) {
+      if (item.url.includes(".mp3") || (item.format && item.format.includes("MP3")) || isSuno) {
+        ext = "mp3";
+      } else if (item.url.includes(".wav")) {
+        ext = "wav";
+      } else if (item.url.includes(".flac")) {
+        ext = "flac";
+      } else {
+        ext = "m4a";
+      }
     }
-    const filename = `${qTag}${rawTitle}.${ext}`;
+
+    const filename = isSuno
+      ? `${rawTitle || "Suno_AI_Song"} - Suno AI.${ext}`
+      : `${item.quality ? `[${item.quality}] ` : ""}${rawTitle}.${ext}`;
 
     const payload = {
       url: item.url,
       pageUrl: window.location.href,
       audioUrl: item.audioUrl || null,
       filename: filename,
-      quality: item.quality || "HD",
+      quality: item.quality || (isAudio ? "320 kbps MP3" : "HD"),
       dimensions: item.dimensions || "",
       formatId: item.formatId || null,
+      category: isAudio || isSuno ? "audio" : "video",
+      thumbnail: item.thumbnail || null,
       referer: window.location.href,
       userAgent: navigator.userAgent
     };
@@ -477,7 +693,7 @@
     if (inBrowser) {
       chrome.runtime.sendMessage({ action: "download_in_browser", payload }, (res) => {
         if (res && res.success) {
-          showTemporaryFeedback(button, "✓ Downloading in Chrome", "macdl-success");
+          showTemporaryFeedback(button, "✓ Downloading in Browser", "macdl-success");
         } else {
           showTemporaryFeedback(button, "Download Failed", "macdl-error");
         }
@@ -512,6 +728,15 @@
 
   function scanMedia() {
     document.querySelectorAll("video, audio").forEach(attachOverlay);
+
+    // Suno AI proactive scanner for currently playing song
+    if (window.location.hostname.includes("suno.com") || window.location.hostname.includes("suno.ai")) {
+      const audioEl = document.querySelector("audio");
+      if (audioEl) {
+        const src = getDirectSource(audioEl);
+        if (src) handleAudioSource(audioEl, src);
+      }
+    }
   }
 
   let scanThrottle = null;

@@ -3,6 +3,8 @@ const STATUS_ENDPOINT = "http://127.0.0.1:45678/api/status";
 
 // Cache for captured media per tab: tabId -> Array of MediaItems
 const tabMediaMap = new Map();
+// Cache for Suno track metadata: uuid or url -> { title, artist, audioUrl, imageUrl, duration }
+const sunoMetadataMap = new Map();
 
 // Extensive YouTube itag dictionary with human-friendly labels and dimensions
 const YOUTUBE_ITAGS = {
@@ -276,18 +278,31 @@ async function resolveUniversalMedia(url, videoId, tabId, directSource) {
   const results = [...daemonStreams];
   const seenUrls = new Set(results.map((r) => r.url));
 
-  // 4. Direct video element source (from <video src="...">)
+  // 4. Direct video or audio element source (from <video> or <audio src="...">)
   if (directSource && !seenUrls.has(directSource)) {
-    const extMatch = directSource.split("?")[0].split(".").pop().toUpperCase();
-    const isDirectAudio = directSource.match(/\.(mp3|m4a|aac|wav|ogg|flac)(\?|$)/i);
+    const extMatch = (directSource.split("?")[0].split(".").pop() || "mp4").toUpperCase();
+    const isDirectAudio = directSource.match(/\.(mp3|m4a|aac|wav|ogg|flac|opus|aiff)(\?|$)/i);
+    const isSuno = directSource.includes(".suno.ai") || directSource.includes(".suno.com") || directSource.includes("audiopipe");
+    const uuidMatch = directSource.match(/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/);
+    const uuid = uuidMatch ? uuidMatch[1] : null;
+    const meta = (uuid && sunoMetadataMap.get(uuid)) || sunoMetadataMap.get(directSource) || null;
+
+    const label = isSuno
+      ? `Suno AI: ${meta?.title || (uuid ? `Suno Track ${uuid.substring(0, 8)}` : "Suno AI Master Track")}`
+      : (isDirectAudio ? `Direct Audio (${extMatch})` : `Direct Video (${extMatch.length <= 4 ? extMatch : "MP4"})`);
+
     const mediaItem = {
       url: directSource,
       audioUrl: null,
-      label: isDirectAudio ? "Direct Audio Track" : `Direct Video (${extMatch.length <= 4 ? extMatch : "MP4"})`,
-      quality: isDirectAudio ? "Audio" : "Source HD",
-      dimensions: isDirectAudio ? "Stereo" : "Direct Stream",
-      format: isDirectAudio ? "Audio Track" : "Direct Media",
-      type: isDirectAudio ? "audio" : "video",
+      label: label,
+      title: meta?.title || (isSuno ? `Suno Track ${uuid ? uuid.substring(0, 8) : ""}` : null),
+      artist: meta?.artist || (isSuno ? "Suno AI" : null),
+      thumbnail: meta?.imageUrl || meta?.thumbnail || null,
+      quality: isSuno ? "320 kbps MP3" : (isDirectAudio ? extMatch : "Source HD"),
+      dimensions: isSuno ? "Suno Master" : (isDirectAudio ? "HQ Audio" : "Direct Stream"),
+      format: isSuno ? "MP3 Audio" : (isDirectAudio ? `${extMatch} Audio` : "Direct Media"),
+      type: isDirectAudio || isSuno ? "audio" : "video",
+      category: isDirectAudio || isSuno ? "audio" : "video",
       combined: true,
       size: 0,
       formattedSize: "Direct Stream"
@@ -400,7 +415,37 @@ function parseMediaUrl(url, contentType = "", contentLength = 0) {
     };
   }
 
-  // Case 4: Standard Video Files
+  // Case 4: Suno AI Audio & Video Streams
+  if (url.includes(".suno.ai") || url.includes(".suno.com") || url.includes("audiopipe")) {
+    const isVideo = url.match(/\.(mp4|webm)(\?|$)/i);
+    const uuidMatch = url.match(/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/);
+    const uuid = uuidMatch ? uuidMatch[1] : null;
+    const meta = (uuid && sunoMetadataMap.get(uuid)) || sunoMetadataMap.get(url) || null;
+
+    const trackTitle = meta?.title || (uuid ? `Suno Track ${uuid.substring(0, 8)}` : "Suno AI Master Track");
+    const artist = meta?.artist || "Suno AI";
+    const thumbnail = meta?.imageUrl || meta?.thumbnail || null;
+
+    return {
+      url: url,
+      originalUrl: url,
+      label: `Suno AI: ${trackTitle}`,
+      title: trackTitle,
+      artist: artist,
+      thumbnail: thumbnail,
+      quality: isVideo ? "Suno Video" : "320 kbps MP3",
+      dimensions: isVideo ? "Visualizer" : "320 kbps Stereo",
+      format: isVideo ? "MP4 Video" : "MP3 Audio",
+      type: isVideo ? "video" : "audio",
+      category: isVideo ? "video" : "audio",
+      combined: true,
+      size: contentLength,
+      contentType: contentType || (isVideo ? "video/mp4" : "audio/mpeg"),
+      timestamp: Date.now()
+    };
+  }
+
+  // Case 5: Standard Video Files
   if (contentType.startsWith("video/") || url.match(/\.(mp4|webm|mkv|mov|avi|flv|m4v)(\?|$)/i)) {
     const ext = url.split("?")[0].split(".").pop().toUpperCase();
     return {
@@ -411,6 +456,7 @@ function parseMediaUrl(url, contentType = "", contentLength = 0) {
       dimensions: `${ext} Video`,
       format: `${ext} Video`,
       type: "video",
+      category: "video",
       combined: true,
       size: contentLength,
       contentType: contentType,
@@ -418,9 +464,12 @@ function parseMediaUrl(url, contentType = "", contentLength = 0) {
     };
   }
 
-  // Case 5: Standard Audio Files
-  if (contentType.startsWith("audio/") || url.match(/\.(mp3|m4a|aac|wav|ogg|flac)(\?|$)/i)) {
-    const ext = url.split("?")[0].split(".").pop().toUpperCase();
+  // Case 6: Standard Audio Files (MP3, WAV, AAC, FLAC, M4A, OGG, OPUS, AIFF)
+  if (
+    contentType.startsWith("audio/") ||
+    url.match(/\.(mp3|m4a|aac|wav|ogg|flac|opus|wma|aiff)(\?|$)/i)
+  ) {
+    const ext = (url.split("?")[0].split(".").pop() || "mp3").toUpperCase();
     return {
       url: url,
       originalUrl: url,
@@ -429,6 +478,7 @@ function parseMediaUrl(url, contentType = "", contentLength = 0) {
       dimensions: `${ext} Audio`,
       format: `${ext} Audio`,
       type: "audio",
+      category: "audio",
       combined: true,
       size: contentLength,
       contentType: contentType,
@@ -453,10 +503,23 @@ function registerMedia(tabId, mediaItem) {
     if (mediaItem.size && !list[existingIndex].size) {
       list[existingIndex].size = mediaItem.size;
     }
+    if (mediaItem.title && (!list[existingIndex].title || list[existingIndex].title.startsWith("Suno Track "))) {
+      list[existingIndex].title = mediaItem.title;
+      list[existingIndex].label = mediaItem.label;
+    }
+    if (mediaItem.thumbnail && !list[existingIndex].thumbnail) {
+      list[existingIndex].thumbnail = mediaItem.thumbnail;
+    }
+    if (mediaItem.artist && !list[existingIndex].artist) {
+      list[existingIndex].artist = mediaItem.artist;
+    }
+    if (mediaItem.category) {
+      list[existingIndex].category = mediaItem.category;
+    }
     return;
   }
 
-  if (mediaItem.combined) {
+  if (mediaItem.combined || mediaItem.type === "audio") {
     list.unshift(mediaItem);
   } else {
     list.push(mediaItem);
@@ -489,7 +552,10 @@ chrome.webRequest.onBeforeRequest.addListener(
     if (
       url.includes(".m3u8") ||
       url.includes(".mpd") ||
-      url.match(/\.(mp4|webm|m4s|m4a|mp3|ts|mov|mkv|flv|m4v)(\?|$)/i) ||
+      url.match(/\.(mp4|webm|m4s|m4a|mp3|wav|aac|flac|ogg|opus|aiff|ts|mov|mkv|flv|m4v)(\?|$)/i) ||
+      url.includes(".suno.ai") ||
+      url.includes(".suno.com") ||
+      url.includes("audiopipe") ||
       url.includes("googlevideo.com") ||
       url.includes("mime=video") ||
       url.includes("mime=audio") ||
@@ -623,6 +689,33 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return false;
   }
 
+  if (request.action === "register_suno_metadata") {
+    const tabId = sender.tab?.id || request.tabId;
+    const meta = request.metadata || {};
+    if (meta.uuid) {
+      sunoMetadataMap.set(meta.uuid, meta);
+    }
+    if (meta.audioUrl) {
+      sunoMetadataMap.set(meta.audioUrl, meta);
+    }
+    if (tabId && tabMediaMap.has(tabId)) {
+      const list = tabMediaMap.get(tabId);
+      for (const item of list) {
+        if ((meta.uuid && item.url.includes(meta.uuid)) || (meta.audioUrl && item.url === meta.audioUrl)) {
+          if (meta.title) {
+            item.title = meta.title;
+            item.label = `Suno AI: ${meta.title}`;
+          }
+          if (meta.imageUrl) item.thumbnail = meta.imageUrl;
+          if (meta.artist) item.artist = meta.artist;
+          item.category = "audio";
+        }
+      }
+    }
+    sendResponse({ success: true });
+    return false;
+  }
+
   if (request.action === "register_client_media") {
     const tabId = sender.tab?.id;
     if (tabId && request.mediaList) {
@@ -646,6 +739,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 async function sendDownloadToApp(payload) {
   if (!payload.url || payload.url.startsWith("blob:") || payload.url.startsWith("data:")) {
     throw new Error("Invalid or unsupported stream URL. Blob URLs cannot be downloaded directly.");
+  }
+
+  // Ensure category is set
+  if (!payload.category) {
+    if (
+      payload.url.match(/\.(mp3|wav|m4a|aac|flac|ogg|opus|aiff)(\?|$)/i) ||
+      payload.url.includes(".suno.ai") ||
+      (payload.quality && payload.quality.toLowerCase().includes("audio"))
+    ) {
+      payload.category = "audio";
+    } else {
+      payload.category = "video";
+    }
   }
 
   // Forward Chrome YouTube session cookies
