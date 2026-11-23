@@ -1101,6 +1101,11 @@
           }
         } catch (e) {}
       }
+
+      // If still unsigned after resolution attempts, switch to in-browser download
+      if (!item.url.includes("Key-Pair-Id") && !item.url.includes("Signature") && !item.url.includes("token")) {
+        inBrowser = true;
+      }
     }
 
     const payload = {

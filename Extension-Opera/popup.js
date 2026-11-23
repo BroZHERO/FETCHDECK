@@ -152,6 +152,13 @@ document.addEventListener("DOMContentLoaded", async () => {
           const { url: finalUrl, authToken } = await resolveSunoIfNeed(btn);
           const safeName = getSafeFilename();
 
+          if (isSuno && !finalUrl.includes("Key-Pair-Id") && !finalUrl.includes("Signature") && !finalUrl.includes("token")) {
+            btn.innerText = "Saving in Browser...";
+            browserBtn.click();
+            setTimeout(() => { btn.innerText = "⬇ Download"; }, 3000);
+            return;
+          }
+
           dispatchDownload(
             finalUrl,
             safeName,

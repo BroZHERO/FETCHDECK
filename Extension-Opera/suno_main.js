@@ -38,6 +38,8 @@
     }
 
     const apiHosts = [
+      `/a/api/download/clip/${clipId}?format=${format}`,
+      `https://suno.com/a/api/download/clip/${clipId}?format=${format}`,
       `https://studio-api.prod.suno.com/api/download/clip/${clipId}?format=${format}`,
       `https://studio-api-prod.suno.com/api/download/clip/${clipId}?format=${format}`
     ];

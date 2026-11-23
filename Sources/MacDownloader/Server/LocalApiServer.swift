@@ -191,6 +191,10 @@ public final class LocalApiServer: @unchecked Sendable {
                                     finalUrl = resolved
                                 }
                             }
+                            // If still unsigned after resolution attempts, reject to prevent adding a guaranteed 403 failure
+                            if !finalUrl.absoluteString.contains("Key-Pair-Id") && !finalUrl.absoluteString.contains("Signature") && !finalUrl.absoluteString.contains("token") {
+                                return makeHttpResponse(status: 403, body: "{\"error\":\"Suno stream requires active session signing. Use the 'Browser' download button in the extension to save directly.\"}")
+                            }
                         }
 
                         Task { @MainActor in
@@ -223,38 +227,45 @@ public final class LocalApiServer: @unchecked Sendable {
     }
 
     private func resolveSunoClipDownloadUrl(uuid: String, authorization: String?, cookie: String?) async -> URL? {
-        let endpoint = "https://studio-api.prod.suno.com/api/download/clip/\(uuid)?format=mp3"
-        guard let apiUrl = URL(string: endpoint) else { return nil }
+        let endpoints = [
+            "https://suno.com/a/api/download/clip/\(uuid)?format=mp3",
+            "https://studio-api.prod.suno.com/api/download/clip/\(uuid)?format=mp3"
+        ]
 
-        var req = URLRequest(url: apiUrl)
-        req.httpMethod = "GET"
-        if let auth = authorization {
-            req.setValue(auth, forHTTPHeaderField: "Authorization")
-        }
-        if let ck = cookie {
-            req.setValue(ck, forHTTPHeaderField: "Cookie")
-        }
-        req.setValue("https://suno.com", forHTTPHeaderField: "Origin")
-        req.setValue("https://suno.com/", forHTTPHeaderField: "Referer")
-        req.setValue("application/json, text/plain, */*", forHTTPHeaderField: "Accept")
+        for endpoint in endpoints {
+            guard let apiUrl = URL(string: endpoint) else { continue }
+            var req = URLRequest(url: apiUrl)
+            req.httpMethod = "GET"
+            if let auth = authorization {
+                req.setValue(auth, forHTTPHeaderField: "Authorization")
+            }
+            if let ck = cookie {
+                req.setValue(ck, forHTTPHeaderField: "Cookie")
+            }
+            req.setValue("https://suno.com", forHTTPHeaderField: "Origin")
+            req.setValue("https://suno.com/", forHTTPHeaderField: "Referer")
+            req.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
+            req.setValue("application/json, text/plain, */*", forHTTPHeaderField: "Accept")
 
-        for _ in 0..<5 {
-            guard let (data, response) = try? await URLSession.shared.data(for: req),
-                  let http = response as? HTTPURLResponse, http.statusCode == 200,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let status = json["status"] as? String else {
+            for _ in 0..<5 {
+                guard let (data, response) = try? await URLSession.shared.data(for: req),
+                      let http = response as? HTTPURLResponse else {
+                    break
+                }
+
+                if http.statusCode == 200,
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let status = json["status"] as? String {
+                    if status == "ready", let downloadUrlStr = json["download_url"] as? String, let dUrl = URL(string: downloadUrlStr) {
+                        return dUrl
+                    }
+                    if status == "processing" {
+                        try? await Task.sleep(nanoseconds: 1_000_000_000)
+                        continue
+                    }
+                }
                 break
             }
-
-            if status == "ready", let downloadUrlStr = json["download_url"] as? String, let dUrl = URL(string: downloadUrlStr) {
-                return dUrl
-            }
-
-            if status == "processing" {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-                continue
-            }
-            break
         }
         return nil
     }
