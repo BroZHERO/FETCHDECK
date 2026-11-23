@@ -393,6 +393,141 @@ it("Validates popup actions include both Download and Browser options", () => {
   assert.strictEqual(rowHtml.includes("browser-pill-btn"), true);
 });
 
+console.log("\n--- TEST GROUP 7: Opera Default File Downloader Interception ---");
+
+function detectDownloadCategory(filename, mime = "") {
+  const lower = (filename || "").toLowerCase();
+  const lowerMime = (mime || "").toLowerCase();
+
+  if (
+    lower.match(/\.(mp4|mkv|mov|avi|webm|flv|wmv|m4v|3gp|ts)$/i) ||
+    lowerMime.includes("video")
+  ) {
+    return "video";
+  }
+
+  if (
+    lower.match(/\.(mp3|wav|m4a|aac|flac|ogg|opus|aiff|wma)$/i) ||
+    lowerMime.includes("audio")
+  ) {
+    return "audio";
+  }
+
+  if (
+    lower.match(/\.(zip|tar|gz|bz2|7z|rar|xz|dmg|iso|pkg|deb|rpm|exe|bin|apk|jar)$/i) ||
+    lowerMime.includes("zip") || lowerMime.includes("compressed") || lowerMime.includes("archive")
+  ) {
+    return "compressed";
+  }
+
+  if (
+    lower.match(/\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|rtf|csv|epub|pages|numbers|key)$/i) ||
+    lowerMime.includes("pdf") || lowerMime.includes("document") || lowerMime.includes("text")
+  ) {
+    return "documents";
+  }
+
+  return "other";
+}
+
+function shouldInterceptDownload(downloadItem, interceptAllDownloads, isAppOnline, internalDownloadIds) {
+  if (!interceptAllDownloads) return false;
+  if (internalDownloadIds.has(downloadItem.id)) return false;
+
+  const url = downloadItem.url || downloadItem.finalUrl;
+  if (!url) return false;
+
+  if (
+    url.startsWith("blob:") ||
+    url.startsWith("data:") ||
+    url.startsWith("chrome:") ||
+    url.startsWith("opera:") ||
+    url.startsWith("about:") ||
+    url.startsWith("filesystem:")
+  ) {
+    return false;
+  }
+
+  const lowerUrl = url.toLowerCase();
+  if (lowerUrl.endsWith(".crx") || lowerUrl.endsWith(".nex") || lowerUrl.endsWith(".oex")) {
+    return false;
+  }
+
+  if (!isAppOnline) return false;
+
+  return true;
+}
+
+it("Correctly classifies file categories for universal Opera downloads", () => {
+  assert.strictEqual(detectDownloadCategory("movie.mp4", "video/mp4"), "video");
+  assert.strictEqual(detectDownloadCategory("song.mp3", "audio/mpeg"), "audio");
+  assert.strictEqual(detectDownloadCategory("archive.zip", "application/zip"), "compressed");
+  assert.strictEqual(detectDownloadCategory("installer.dmg", ""), "compressed");
+  assert.strictEqual(detectDownloadCategory("document.pdf", "application/pdf"), "documents");
+  assert.strictEqual(detectDownloadCategory("custom.dat", "application/octet-stream"), "other");
+});
+
+it("Intercepts legitimate file downloads in Opera when FetchDeck is online", () => {
+  const item = {
+    id: 101,
+    url: "https://releases.ubuntu.com/24.04/ubuntu-24.04-desktop-arm64.iso",
+    filename: "ubuntu-24.04-desktop-arm64.iso"
+  };
+  const internalIds = new Set();
+  const intercepted = shouldInterceptDownload(item, true, true, internalIds);
+  assert.strictEqual(intercepted, true, "Standard web download should be intercepted by FetchDeck");
+});
+
+it("Bypasses browser extension packages so Opera can install extensions cleanly", () => {
+  const extItem = {
+    id: 102,
+    url: "https://addons.opera.com/extensions/download/my_ext.crx",
+    filename: "my_ext.crx"
+  };
+  const internalIds = new Set();
+  assert.strictEqual(shouldInterceptDownload(extItem, true, true, internalIds), false);
+});
+
+it("Bypasses internal extension downloads to avoid infinite download loops", () => {
+  const item = {
+    id: 103,
+    url: "https://example.com/sample.mp4",
+    filename: "sample.mp4"
+  };
+  const internalIds = new Set([103]);
+  assert.strictEqual(shouldInterceptDownload(item, true, true, internalIds), false);
+});
+
+it("Bypasses in-memory blob URLs so in-page WebAudio blobs render safely", () => {
+  const blobItem = {
+    id: 104,
+    url: "blob:https://suno.com/550e8400-e29b-41d4-a716-446655440000",
+    filename: "song.mp3"
+  };
+  const internalIds = new Set();
+  assert.strictEqual(shouldInterceptDownload(blobItem, true, true, internalIds), false);
+});
+
+it("Bypasses when user turns off default downloader toggle in popup", () => {
+  const item = {
+    id: 105,
+    url: "https://example.com/archive.zip",
+    filename: "archive.zip"
+  };
+  const internalIds = new Set();
+  assert.strictEqual(shouldInterceptDownload(item, false, true, internalIds), false);
+});
+
+it("Bypasses safely if FetchDeck desktop app is offline", () => {
+  const item = {
+    id: 106,
+    url: "https://example.com/archive.zip",
+    filename: "archive.zip"
+  };
+  const internalIds = new Set();
+  assert.strictEqual(shouldInterceptDownload(item, true, false, internalIds), false, "Must let Opera download normally if FetchDeck is closed");
+});
+
 console.log("\n=================================================");
 console.log(`  ALL BACKTESTS PASSED! (${passedTests}/${totalTests} assertions)`);
 console.log("=================================================");

@@ -5,6 +5,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   const quickUrlInput = document.getElementById("quickUrlInput");
   const quickSendBtn = document.getElementById("quickSendBtn");
   const feedbackMsg = document.getElementById("feedbackMsg");
+  const interceptToggle = document.getElementById("interceptToggle");
+
+  if (interceptToggle) {
+    chrome.storage.local.get({ interceptAllDownloads: true }, (items) => {
+      interceptToggle.checked = items.interceptAllDownloads !== false;
+    });
+
+    interceptToggle.addEventListener("change", () => {
+      const val = interceptToggle.checked;
+      chrome.storage.local.set({ interceptAllDownloads: val });
+    });
+  }
 
   // Check MacDownloader App connectivity
   chrome.runtime.sendMessage({ action: "check_status" }, (res) => {

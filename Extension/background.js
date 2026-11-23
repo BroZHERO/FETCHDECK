@@ -749,6 +749,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (chrome.runtime.lastError) {
           sendResponse({ success: false, error: chrome.runtime.lastError.message });
         } else {
+          if (downloadId) {
+            internalDownloadIds.add(downloadId);
+          }
           sendResponse({ success: true, downloadId });
         }
       }
@@ -932,3 +935,156 @@ async function sendDownloadToApp(payload) {
   }
   return await response.json();
 }
+
+// -------------------------------------------------------------------
+// BROWSER DEFAULT FILE DOWNLOADER INTERCEPTOR
+// Replaces browser's built-in single-threaded downloader with FETCHDECK
+// -------------------------------------------------------------------
+let interceptAllDownloads = true;
+const internalDownloadIds = new Set();
+
+chrome.storage.local.get({ interceptAllDownloads: true }, (items) => {
+  interceptAllDownloads = items.interceptAllDownloads !== false;
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.interceptAllDownloads) {
+    interceptAllDownloads = changes.interceptAllDownloads.newValue !== false;
+  }
+});
+
+async function isFetchDeckOnline() {
+  try {
+    const res = await fetch(STATUS_ENDPOINT, { method: "GET" });
+    return res.ok;
+  } catch (e) {
+    return false;
+  }
+}
+
+function detectDownloadCategory(filename, mime = "") {
+  const lower = (filename || "").toLowerCase();
+  const lowerMime = (mime || "").toLowerCase();
+
+  if (
+    lower.match(/\.(mp4|mkv|mov|avi|webm|flv|wmv|m4v|3gp|ts)$/i) ||
+    lowerMime.includes("video")
+  ) {
+    return "video";
+  }
+
+  if (
+    lower.match(/\.(mp3|wav|m4a|aac|flac|ogg|opus|aiff|wma)$/i) ||
+    lowerMime.includes("audio")
+  ) {
+    return "audio";
+  }
+
+  if (
+    lower.match(/\.(zip|tar|gz|bz2|7z|rar|xz|dmg|iso|pkg|deb|rpm|exe|bin|apk|jar)$/i) ||
+    lowerMime.includes("zip") || lowerMime.includes("compressed") || lowerMime.includes("archive")
+  ) {
+    return "compressed";
+  }
+
+  if (
+    lower.match(/\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|rtf|csv|epub|pages|numbers|key)$/i) ||
+    lowerMime.includes("pdf") || lowerMime.includes("document") || lowerMime.includes("text")
+  ) {
+    return "documents";
+  }
+
+  return "other";
+}
+
+chrome.downloads.onCreated.addListener(async (downloadItem) => {
+  if (!interceptAllDownloads) return;
+
+  // 1. Skip if initiated internally by FetchDeck extension
+  if (internalDownloadIds.has(downloadItem.id)) {
+    internalDownloadIds.delete(downloadItem.id);
+    return;
+  }
+
+  const url = downloadItem.url || downloadItem.finalUrl;
+  if (!url) return;
+
+  // 2. Skip in-memory blobs, data URIs, or internal browser pages
+  if (
+    url.startsWith("blob:") ||
+    url.startsWith("data:") ||
+    url.startsWith("chrome:") ||
+    url.startsWith("opera:") ||
+    url.startsWith("about:") ||
+    url.startsWith("filesystem:")
+  ) {
+    return;
+  }
+
+  // 3. Skip browser extensions (.crx, .nex, .oex)
+  const lowerUrl = url.toLowerCase();
+  if (lowerUrl.endsWith(".crx") || lowerUrl.endsWith(".nex") || lowerUrl.endsWith(".oex")) {
+    return;
+  }
+
+  // 4. Verify FetchDeck desktop app is online before cancelling
+  const online = await isFetchDeckOnline();
+  if (!online) {
+    return;
+  }
+
+  // 5. Cancel and erase the browser default download so FetchDeck takes over
+  chrome.downloads.cancel(downloadItem.id, () => {
+    if (chrome.runtime.lastError) {}
+    chrome.downloads.erase({ id: downloadItem.id }, () => {
+      if (chrome.runtime.lastError) {}
+    });
+  });
+
+  // 6. Extract clean filename
+  let filename = downloadItem.filename ? downloadItem.filename.split(/[\/\\]/).pop() : null;
+  if (!filename || filename.trim() === "") {
+    try {
+      const u = new URL(url);
+      filename = u.pathname.split("/").pop();
+      if (filename && filename.includes("?")) {
+        filename = filename.split("?")[0];
+      }
+    } catch (e) {}
+  }
+  if (!filename || filename.trim() === "") {
+    filename = "download";
+  }
+
+  // 7. Detect Category
+  const category = detectDownloadCategory(filename, downloadItem.mime);
+
+  // 8. Gather cookies for the target host
+  let cookieHeader = "";
+  try {
+    cookieHeader = await getCookiesForPayload({ url: url, pageUrl: downloadItem.referrer });
+  } catch (e) {}
+
+  // 9. Build payload and dispatch to FetchDeck app
+  const payload = {
+    url: url,
+    filename: filename,
+    referer: downloadItem.referrer || "",
+    userAgent: navigator.userAgent,
+    cookie: cookieHeader,
+    category: category,
+    quality: "Default Downloader",
+    dimensions: downloadItem.totalBytes > 0 ? `${(downloadItem.totalBytes / (1024 * 1024)).toFixed(1)} MB` : ""
+  };
+
+  try {
+    await sendDownloadToApp(payload);
+    chrome.action.setBadgeText({ text: "⚡" });
+    chrome.action.setBadgeBackgroundColor({ color: "#007aff" });
+    setTimeout(() => {
+      chrome.action.setBadgeText({ text: "" });
+    }, 4000);
+  } catch (err) {
+    console.error("Failed to route intercepted download to FetchDeck:", err);
+  }
+});
