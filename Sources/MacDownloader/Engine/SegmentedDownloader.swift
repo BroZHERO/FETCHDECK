@@ -496,11 +496,20 @@ public actor SegmentedDownloader {
         guard let httpResponse = response as? HTTPURLResponse,
               (httpResponse.statusCode == 200 || httpResponse.statusCode == 206) else {
             try fileHandle.close()
-            if let http = response as? HTTPURLResponse, http.statusCode == 403 {
+            if let http = response as? HTTPURLResponse {
+                let statusMsg = HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
+                let detailMsg: String
+                if http.statusCode == 403 {
+                    detailMsg = "Access restricted (HTTP 403 Forbidden). The stream URL may have expired, or requires session authentication. Try the 'Browser' download button to save directly."
+                } else if http.statusCode == 404 {
+                    detailMsg = "File not found (HTTP 404). The media stream may have expired or moved."
+                } else {
+                    detailMsg = "Server returned HTTP \(http.statusCode) (\(statusMsg))."
+                }
                 throw NSError(
-                    domain: "MacDownloader",
-                    code: 403,
-                    userInfo: [NSLocalizedDescriptionKey: "YouTube CDN access restricted (HTTP 403). Use the 'Browser' download button in Chrome to save directly."]
+                    domain: "FETCHDECK",
+                    code: http.statusCode,
+                    userInfo: [NSLocalizedDescriptionKey: detailMsg]
                 )
             }
             throw URLError(.badServerResponse)
@@ -636,6 +645,14 @@ public actor SegmentedDownloader {
 
                 let (bytes, response) = try await session.bytes(for: req)
                 guard let http = response as? HTTPURLResponse, (http.statusCode == 200 || http.statusCode == 206) else {
+                    if let http = response as? HTTPURLResponse {
+                        let statusMsg = HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
+                        throw NSError(
+                            domain: "FETCHDECK",
+                            code: http.statusCode,
+                            userInfo: [NSLocalizedDescriptionKey: "Server returned HTTP \(http.statusCode) (\(statusMsg)). Stream URL may be expired or forbidden."]
+                        )
+                    }
                     throw URLError(.badServerResponse)
                 }
 

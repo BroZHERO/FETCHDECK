@@ -234,6 +234,39 @@
   let activeFloatingPill = null;
   let currentAudioItem = null;
 
+  function isIgnoredMediaUrl(url) {
+    if (!url || typeof url !== "string") return true;
+    if (url.startsWith("blob:") || url.startsWith("data:") || url.startsWith("javascript:")) return true;
+
+    const lower = url.toLowerCase();
+
+    // 1. Explicit placeholder / forbidden / error URLs
+    if (
+      lower.includes("forbidden") ||
+      lower.includes("silence") ||
+      lower.includes("blank.mp3") ||
+      lower.includes("dummy") ||
+      lower.includes("placeholder") ||
+      lower.includes("track_not_found")
+    ) {
+      return true;
+    }
+
+    // 2. Suno AI specific filters
+    if (lower.includes("suno.com") || lower.includes("suno.ai")) {
+      if (lower.includes("studio-api.") || lower.includes("/api/")) {
+        return true;
+      }
+      const isSunoCdn = lower.includes("cdn1.suno.ai") || lower.includes("cdn2.suno.ai") || lower.includes("audiopipe.suno.ai");
+      const hasUuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(lower);
+      if (!isSunoCdn && !hasUuid) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   function extractSunoMetadata(audioUrl) {
     const uuidMatch = audioUrl.match(/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/);
     const uuid = uuidMatch ? uuidMatch[1] : null;
@@ -314,7 +347,7 @@
   }
 
   function handleAudioSource(mediaElement, src) {
-    if (!src || src.startsWith("blob:") || src.startsWith("data:") || !src.startsWith("http")) return;
+    if (!src || isIgnoredMediaUrl(src) || !src.startsWith("http")) return;
 
     const isSuno = window.location.hostname.includes("suno.com") || window.location.hostname.includes("suno.ai") || src.includes(".suno.ai") || src.includes("audiopipe");
     let meta = null;
@@ -423,13 +456,15 @@
       mediaElement.dataset.macdlAttached = "true";
       const onAudioPlay = () => {
         const src = getDirectSource(mediaElement);
-        if (src) handleAudioSource(mediaElement, src);
+        if (src && !isIgnoredMediaUrl(src)) handleAudioSource(mediaElement, src);
       };
       mediaElement.addEventListener("play", onAudioPlay);
       mediaElement.addEventListener("playing", onAudioPlay);
       mediaElement.addEventListener("loadedmetadata", onAudioPlay);
       const initialSrc = getDirectSource(mediaElement);
-      if (initialSrc) handleAudioSource(mediaElement, initialSrc);
+      if (initialSrc && !mediaElement.paused && !isIgnoredMediaUrl(initialSrc)) {
+        handleAudioSource(mediaElement, initialSrc);
+      }
 
       // Only attach in-place overlay button if audio element is visibly rendered
       const rect = mediaElement.getBoundingClientRect();
@@ -726,16 +761,75 @@
     return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 
+  function scanSunoPageTracks() {
+    // 1. Check active audio element (only if currently playing and not ignored)
+    const audioEl = document.querySelector("audio");
+    if (audioEl) {
+      const src = getDirectSource(audioEl);
+      if (src && !isIgnoredMediaUrl(src) && !audioEl.paused) {
+        handleAudioSource(audioEl, src);
+      }
+    }
+
+    // 2. Discover visible song tracks in library or feed
+    const songLinks = document.querySelectorAll('a[href*="/song/"]');
+    const discovered = [];
+    const seenUuids = new Set();
+
+    songLinks.forEach((link) => {
+      const href = link.getAttribute("href") || "";
+      const match = href.match(/\/song\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/);
+      if (!match) return;
+      const uuid = match[1];
+      if (seenUuids.has(uuid)) return;
+      seenUuids.add(uuid);
+
+      const title = link.innerText.trim();
+      if (!title || title.length < 2) return;
+
+      const mp3Url = `https://cdn1.suno.ai/${uuid}.mp3`;
+      let imageUrl = null;
+      let artist = "Suno AI";
+
+      const card = link.closest('[data-testid*="song"], [data-testid*="track"], div[class*="row"], div[class*="card"], div[class*="item"]') || link.parentElement?.parentElement;
+      if (card) {
+        const img = card.querySelector("img");
+        if (img && img.src && !img.src.includes("avatar")) imageUrl = img.src;
+        const artistEl = card.querySelector('a[href*="/@"], span[class*="creator"], span[class*="user"]');
+        if (artistEl) artist = artistEl.innerText.trim();
+      }
+
+      discovered.push({
+        url: mp3Url,
+        audioUrl: null,
+        label: `Suno AI: ${title}`,
+        title: title,
+        artist: artist,
+        thumbnail: imageUrl,
+        quality: "320 kbps MP3",
+        dimensions: "Suno Master",
+        format: "MP3 Audio",
+        type: "audio",
+        category: "audio",
+        combined: true,
+        size: 0,
+        formattedSize: "320 kbps MP3"
+      });
+    });
+
+    if (discovered.length > 0) {
+      chrome.runtime.sendMessage({
+        action: "register_client_media",
+        mediaList: discovered
+      });
+    }
+  }
+
   function scanMedia() {
     document.querySelectorAll("video, audio").forEach(attachOverlay);
 
-    // Suno AI proactive scanner for currently playing song
     if (window.location.hostname.includes("suno.com") || window.location.hostname.includes("suno.ai")) {
-      const audioEl = document.querySelector("audio");
-      if (audioEl) {
-        const src = getDirectSource(audioEl);
-        if (src) handleAudioSource(audioEl, src);
-      }
+      scanSunoPageTracks();
     }
   }
 

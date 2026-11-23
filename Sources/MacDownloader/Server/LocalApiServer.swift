@@ -150,6 +150,11 @@ public final class LocalApiServer: @unchecked Sendable {
                             return makeHttpResponse(status: 400, body: "{\"error\":\"Browser blob/data URLs cannot be downloaded directly. Please select an HTTP media stream from the extension quality dropdown.\"}")
                         }
 
+                        // Validate against Suno dummy placeholder / forbidden URLs
+                        if urlString.lowercased().contains("forbidden.webm") || urlString.lowercased().contains("/forbidden") {
+                            return makeHttpResponse(status: 400, body: "{\"error\":\"Cannot download dummy placeholder URL (forbidden.webm). Please press Play on a valid track before fetching.\"}")
+                        }
+
                         guard let url = URL(string: urlString),
                               let scheme = url.scheme?.lowercased(),
                               (scheme == "http" || scheme == "https") else {

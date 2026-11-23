@@ -279,7 +279,7 @@ async function resolveUniversalMedia(url, videoId, tabId, directSource) {
   const seenUrls = new Set(results.map((r) => r.url));
 
   // 4. Direct video or audio element source (from <video> or <audio src="...">)
-  if (directSource && !seenUrls.has(directSource)) {
+  if (directSource && !seenUrls.has(directSource) && !isIgnoredMediaUrl(directSource)) {
     const extMatch = (directSource.split("?")[0].split(".").pop() || "mp4").toUpperCase();
     const isDirectAudio = directSource.match(/\.(mp3|m4a|aac|wav|ogg|flac|opus|aiff)(\?|$)/i);
     const isSuno = directSource.includes(".suno.ai") || directSource.includes(".suno.com") || directSource.includes("audiopipe");
@@ -326,9 +326,42 @@ async function resolveUniversalMedia(url, videoId, tabId, directSource) {
   };
 }
 
+function isIgnoredMediaUrl(url) {
+  if (!url || typeof url !== "string") return true;
+  if (url.startsWith("blob:") || url.startsWith("data:") || url.startsWith("javascript:")) return true;
+
+  const lower = url.toLowerCase();
+
+  // 1. Explicit placeholder / forbidden / error URLs
+  if (
+    lower.includes("forbidden") ||
+    lower.includes("silence") ||
+    lower.includes("blank.mp3") ||
+    lower.includes("dummy") ||
+    lower.includes("placeholder") ||
+    lower.includes("track_not_found")
+  ) {
+    return true;
+  }
+
+  // 2. Suno AI specific filters
+  if (lower.includes("suno.com") || lower.includes("suno.ai")) {
+    if (lower.includes("studio-api.") || lower.includes("/api/")) {
+      return true;
+    }
+    const isSunoCdn = lower.includes("cdn1.suno.ai") || lower.includes("cdn2.suno.ai") || lower.includes("audiopipe.suno.ai");
+    const hasUuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(lower);
+    if (!isSunoCdn && !hasUuid) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 // Sniffer URL filter with IDM Master Stream Reconstruction
 function parseMediaUrl(url, contentType = "", contentLength = 0) {
-  if (!url || url.startsWith("blob:") || url.startsWith("data:")) return null;
+  if (!url || isIgnoredMediaUrl(url)) return null;
 
   // Case 1: YouTube Google Video Playback
   if (url.includes("googlevideo.com/videoplayback")) {
@@ -490,7 +523,7 @@ function parseMediaUrl(url, contentType = "", contentLength = 0) {
 }
 
 function registerMedia(tabId, mediaItem) {
-  if (tabId < 0 || !mediaItem || !mediaItem.url) return;
+  if (tabId < 0 || !mediaItem || !mediaItem.url || isIgnoredMediaUrl(mediaItem.url)) return;
 
   if (!tabMediaMap.has(tabId)) {
     tabMediaMap.set(tabId, []);
@@ -548,6 +581,7 @@ chrome.webRequest.onBeforeRequest.addListener(
   (details) => {
     if (details.tabId < 0) return;
     const url = details.url;
+    if (isIgnoredMediaUrl(url)) return;
 
     if (
       url.includes(".m3u8") ||
@@ -577,6 +611,7 @@ chrome.webRequest.onBeforeRequest.addListener(
 chrome.webRequest.onResponseStarted.addListener(
   (details) => {
     if (details.tabId < 0) return;
+    if (isIgnoredMediaUrl(details.url)) return;
 
     const headers = details.responseHeaders || [];
     let contentType = "";
